@@ -1,0 +1,726 @@
+---
+title: "IMDb XGBoost"
+author: "Vijay"
+date: "05/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+library(randomForest)
+library(caret)
+library(xgboost)
+library(OptimalCutpoints)
+library(pROC)
+
+num_threads = 6
+```
+
+
+##Reading in data
+```{r}
+load("./full_imdb_dataset.rda")
+```
+
+```{r}
+library(httr)
+library(XML)
+
+url <- "https://en.wikipedia.org/wiki/List_of_films_based_on_video_games"
+
+r <- GET(url)
+
+doc <- readHTMLTable(doc=content(r, "text"))
+vg_movies <- c(doc[[1]][2:43,'V1'], doc[[2]][2:5,'V1'])
+```
+
+```{r cleaning and adding is_vg}
+#names(total_data_imdb) <- gsub(" ", "_", names(total_data_imdb))
+#names(total_data_imdb) <- gsub("^_", "", names(total_data_imdb))
+for(title in total_data_imdb){
+  total_data_imdb$is_vg <- ifelse(total_data_imdb$original_title %in% vg_movies, 1, 0)
+}
+```
+
+```{r filetering out columns}
+dup_names <- !duplicated(names(total_data_imdb))
+summary(dup_names)
+total_data_imdb2 <- total_data_imdb[,dup_names]
+summary(duplicated(names(total_data_imdb2)))
+
+dtypes <- sapply(total_data_imdb2, class)
+numeric_index <- dtypes %in% c('numeric', 'integer', 'factor')
+
+total_data_num <- total_data_imdb2[,numeric_index]
+
+
+rm_cols <- c("original_title",
+              "year",
+              "genre1",
+              "genre2",
+              "genre3",
+              "country",
+              "language",
+              "director1",
+              "director2",
+              "writer1",
+              "writer2",
+              "writer3",
+              "production_company",
+              "director", 
+              "actor",
+              "actor1",
+              "actor2",
+              "actor3",
+              "actor4",
+              "actor5",
+              "avg_vote",
+              "votes",
+              "usa_gross_income",
+              "worlwide_gross_income",
+              "metascore",
+              "reviews_from_users",
+              "reviews_from_critics",
+              "weighted_average_vote",
+              "total_votes",
+              "mean_vote",
+              "median_vote",
+              "votes_10",
+              "votes_9",
+              "votes_8",
+              "votes_7",
+              "votes_6",
+              "votes_5",
+              "votes_4",
+              "votes_3",
+              "votes_2",
+              "votes_1",
+              "allgenders_0age_avg_vote",
+              "allgenders_0age_votes",
+              "allgenders_18age_avg_vote",
+              "allgenders_18age_votes",
+              "allgenders_30age_avg_vote",
+              "allgenders_30age_votes",
+              "allgenders_45age_avg_vote",
+              "allgenders_45age_votes",
+              "males_allages_avg_vote",
+              "males_allages_votes",
+              "males_0age_avg_vote",
+              "males_0age_votes",
+              "males_18age_avg_vote",
+              "males_18age_votes",
+              "males_30age_avg_vote",
+              "males_30age_votes",
+              "males_45age_avg_vote",
+              "males_45age_votes",
+              "females_allages_avg_vote",
+              "females_allages_votes",
+              "females_0age_avg_vote",
+              "females_0age_votes",
+              "females_18age_avg_vote",
+              "females_18age_votes",
+              "females_30age_avg_vote",
+              "females_30age_votes",
+              "females_45age_avg_vote",
+              "females_45age_votes",
+              "top1000_voters_rating",
+              "top1000_voters_votes",
+              "us_voters_rating",
+              "us_voters_votes",
+              "non_us_voters_rating",
+              "non_us_voters_votes",
+              "domestic_profit",
+              "worldwide_profit",
+              "domestic_profitability",
+              "worldwide_profitability",
+              "Var.11971"  
+             )
+
+
+#Removing problematic columns
+total_data_num <- total_data_num[, which(!names(total_data_num) %in% rm_cols)]
+
+dim(total_data_imdb)
+dim(total_data_num)
+
+#save(total_data_num, file = 'imdb_data_num.rda')
+
+#load("./imdb_data_num.rda")
+```
+
+```{r}
+#dtypes <- sapply(total_data_num, class)
+#numeric_index <- dtypes %in% c('factor')
+
+#match(TRUE, numeric_index)
+
+#colnames(total_data_num)
+
+col_weights <- colSums(Filter(is.numeric, total_data_num))
+
+narrow_cols <- c(names(col_weights[col_weights >= 7]),
+                 "is_vg",
+                 
+                 "Ruben_Fleischer_director",
+                 "Tom_Holland_actor",
+                 #"Mark_Wahlberg_actor",
+                 #"Antonio_Banderas_actor",
+                 
+                 "profit"
+                 )
+
+total_data <- total_data_num[,narrow_cols]
+#dim(total_data)
+```
+
+```{r}
+save(total_data, file = 'total_data.rda')
+```
+
+#X--------------X--------------X----------------X---------------X--------------X
+# XGBoost from gere on
+
+```{r Data Split}
+load("./total_data.rda")
+
+train_index <- createDataPartition(total_data$profit, p=0.8, list=F)
+train_db <- total_data[train_index,]
+test_db <- total_data[-train_index,]
+
+#Create train matrix
+dtrain <- xgb.DMatrix(data = as.matrix(train_db[ ,!names(train_db) %in% c("profit")]), label = as.numeric(train_db$profit) -1)
+
+# Create test matrix
+dtest <- xgb.DMatrix(data = as.matrix(test_db[ ,!names(test_db) %in% c("profit")]), label = as.numeric(test_db$profit) - 1)
+```
+
+```{r}
+load("./total_data.rda")
+
+no_profit <- total_data[which(total_data$profit == 0),] 
+profit <- total_data[which(total_data$profit == 1),]
+nrow(no_profit)
+nrow(profit)
+set.seed(2345) 
+#no_profit_boot <- no_profit[sample(1:nrow(no_profit), size = nrow(profit), replace =TRUE),]
+profit_boot <- profit[sample(1:nrow(profit), size = nrow(no_profit), replace =TRUE),]
+nrow(profit_boot)
+total_data_1 <- rbind.data.frame(profit_boot, no_profit) # Join data together
+
+train_index <- createDataPartition(total_data_1$profit, p=0.8, list=F)
+train_db <- total_data_1[train_index,]
+test_db <- total_data_1[-train_index,]
+
+#Create train matrix
+dtrain <- xgb.DMatrix(data = as.matrix(train_db[ ,!names(train_db) %in% c("profit")]), label = as.numeric(train_db$profit) -1)
+
+# Create test matrix
+dtest <- xgb.DMatrix(data = as.matrix(test_db[ ,!names(test_db) %in% c("profit")]), label = as.numeric(test_db$profit) - 1)
+
+```
+
+
+```{r Initial XGB Iteration check, echo=FALSE}
+set.seed(2345)
+bst_mod <- xgb.cv(data = dtrain,
+               nfold = 5,
+               nrounds = 5000, 
+               
+               verbose = 1, 
+               print_every_n = 1000, 
+               
+               nthread = num_threads,
+               
+               objective = "binary:logistic", 
+               eval_metric = "auc",
+               eval_metric = "error")
+```
+
+```{r Initial Iteration plot}
+ggplot(bst_mod$evaluation_log, aes(x = iter, y = test_error_mean)) + 
+  geom_point(alpha = 0.5, color = "darkgreen") + 
+  theme_bw() + 
+  geom_smooth(color = "purple") + 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(), 
+        panel.background = element_blank()) +  
+  labs(x = "Number of Iterations", title = "Error Rate v Number of Iterations",
+       y = "Error Rate")  
+
+```
+
+```{r Initial XGB Model}
+set.seed(2345)
+
+bst <- xgboost(data = dtrain,
+               
+               nrounds = 1000, 
+               
+               verbose = 0, 
+               print_every_n = 100, 
+               
+               nthread = num_threads,
+               
+               objective = "binary:logistic", 
+               eval_metric = "auc",
+               eval_metric = "error") 
+
+```
+
+```{r Initial XGB Prediction}
+bst_preds <- predict(bst, dtest)
+
+bst_pred_class <- rep(0, length(bst_preds))
+bst_pred_class[bst_preds >= 0.5] <- 1
+
+t <- table(bst_pred_class, test_db$profit) 
+
+confusionMatrix(t, positive = "1") 
+```
+
+```{r eta Tuning}
+set.seed(2345)
+bst_mod_eta3 <- xgb.cv(data = dtrain, 
+              
+              nfold = 5, 
+               
+              eta = 0.3, 
+              max.depth = 5, 
+              min_child_weight = 5, 
+              gamma = 0, 
+              subsample = 0.9,
+              colsample_bytree =  0.9, 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 1, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error") 
+
+
+bst_mod_eta1 <- xgb.cv(data = dtrain, 
+              
+              nfold = 5,
+               
+              eta = 0.1, 
+              max.depth = 5, 
+              min_child_weight = 5, 
+              gamma = 0, 
+              subsample = 0.9, 
+              colsample_bytree =  0.9, 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 1, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error") 
+
+
+bst_mod_eta05 <- xgb.cv(data = dtrain, 
+              
+              nfold = 5, 
+               
+              eta = 0.05, 
+              max.depth = 5, 
+              min_child_weight = 5, 
+              gamma = 0, 
+              subsample = 0.9, 
+              colsample_bytree =  0.9, 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 1, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error") 
+
+
+bst_mod_eta01 <- xgb.cv(data = dtrain, 
+              
+              nfold = 5, 
+               
+              eta = 0.01, 
+              max.depth = 5, 
+              min_child_weight = 5, 
+              gamma = 0, 
+              subsample = 0.9, 
+              colsample_bytree =  0.9, 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 1, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error") 
+
+
+bst_mod_eta005 <- xgb.cv(data = dtrain, 
+              
+              nfold = 5, 
+               
+              eta = 0.005, 
+              max.depth = 5, 
+              min_child_weight = 5, 
+              gamma = 0, 
+              subsample = 0.9, 
+              colsample_bytree =  0.9, 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 1, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error") 
+```
+```{r eta Plot data}
+# Extract results for model with eta = 0.3
+pd1 <- cbind.data.frame(bst_mod_eta3$evaluation_log[,c("iter", "test_error_mean")], rep(0.3, nrow(bst_mod_eta3$evaluation_log)))
+names(pd1)[3] <- "eta"
+
+# Extract results for model with eta = 0.1
+pd2 <- cbind.data.frame(bst_mod_eta1$evaluation_log[,c("iter", "test_error_mean")], rep(0.1, nrow(bst_mod_eta1$evaluation_log)))
+names(pd2)[3] <- "eta"
+
+# Extract results for model with eta = 0.05
+pd3 <- cbind.data.frame(bst_mod_eta05$evaluation_log[,c("iter", "test_error_mean")], rep(0.05, nrow(bst_mod_eta05$evaluation_log)))
+names(pd3)[3] <- "eta"
+
+# Extract results for model with eta = 0.01
+pd4 <- cbind.data.frame(bst_mod_eta01$evaluation_log[,c("iter", "test_error_mean")], rep(0.01, nrow(bst_mod_eta01$evaluation_log)))
+names(pd4)[3] <- "eta"
+
+# Extract results for model with eta = 0.005
+pd5 <- cbind.data.frame(bst_mod_eta005$evaluation_log[,c("iter", "test_error_mean")], rep(0.005, nrow(bst_mod_eta005$evaluation_log)))
+names(pd5)[3] <- "eta"
+
+plot_data <- rbind.data.frame(pd1, pd2, pd3, pd4, pd5)
+# Converty ETA to factor
+plot_data$eta <- as.factor(plot_data$eta)
+```
+
+```{r eta Plotting}
+ggplot(plot_data, aes(x = iter, y = test_error_mean, color = eta))+
+  geom_smooth(alpha = 0.5) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank(), 
+        panel.background = element_blank()) + 
+  labs(x = "Number of Trees", title = "Error Rate v Number of Trees",
+       y = "Error Rate", color = "Learning \n Rate")  
+
+```  
+
+```{r Depth child weight tune}
+#max_depth <- c(5, 6, 7, 8, 9) 
+#min_child_wt <- c(1, 5, 10, 15, 20)
+max_depth <- c(3, 4, 5, 6) #4 5
+min_child_wt <- c(1, 3, 5) #1
+
+
+cv_params <- expand.grid(max_depth, min_child_wt)
+names(cv_params) <- c("max_depth", "min_child_wt")
+
+auc_vec <- error_vec <- rep(NA, nrow(cv_params)) 
+
+set.seed(2345)
+for(i in 1:nrow(cv_params)){
+  
+  print(i)
+  
+  bst_tune <- xgb.cv(data = dtrain, 
+               
+              nfold = 5,
+              
+              eta = 0.3, 
+              max.depth = cv_params$max_depth[i], 
+              min_child_weight = cv_params$min_child_wt[i], 
+              gamma = 0, 
+              subsample = 0.9,
+              colsample_bytree =  0.9, 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 1, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error")
+  
+  auc_vec[i] <- bst_tune$evaluation_log$test_auc_mean[bst_tune$best_ntreelimit]
+  error_vec[i] <- bst_tune$evaluation_log$test_error_mean[bst_tune$best_ntreelimit]
+}
+```
+
+```{r depth child wt plot}
+# Join results in dataset
+res_db <- cbind.data.frame(cv_params, auc_vec, error_vec)
+names(res_db)[3:4] <- c("auc", "error") 
+res_db$max_depth <- as.factor(res_db$max_depth)
+res_db$min_child_wt <- as.factor(res_db$min_child_wt) 
+
+ggplot(res_db, aes(y = max_depth, x = min_child_wt, fill = auc)) + # set aesthetics
+  geom_tile() + # Use geom_tile for heatmap
+  theme_bw() + # Set theme
+  scale_fill_gradient2(low = "red", # Choose low color
+    mid = "white", # Choose mid color
+    high = "blue", # Choose high color
+    midpoint =mean(res_db$auc), # Choose mid point
+    space = "Lab", 
+    na.value ="grey", # Choose NA value
+    guide = "colourbar", # Set color bar
+    aesthetics = "fill") + # Select aesthetics to apply
+  labs(x = "Minimum Child Weight", y = "Max Depth", fill = "AUC") # Set labels
+
+ggplot(res_db, aes(y = max_depth, x = min_child_wt, fill = error)) + # set aesthetics
+  geom_tile() + # Use geom_tile for heatmap
+  theme_bw() + # Set theme
+  scale_fill_gradient2(low = "blue", # Choose low color
+    mid = "white", # Choose mid color
+    high = "red", # Choose high color
+    midpoint =mean(res_db$error), # Choose mid point
+    space = "Lab", 
+    na.value ="grey", # Choose NA value
+    guide = "colourbar", # Set color bar
+    aesthetics = "fill") + # Select aesthetics to apply
+  labs(x = "Minimum Child Weight", y = "Max Depth", fill = "Error") # Set labels
+
+```
+
+```{r gamma tune}
+
+gamma_vals <- c(0, 0.05, 0.10, 0.15, 0.20, 0.25) #0.2 0.25
+
+auc_vec <- error_vec <- rep(NA, length(gamma_vals)) 
+
+set.seed(2345)
+for(i in 1:length(gamma_vals)){
+
+  print(i)
+  
+  bst_tune <- xgb.cv(data = dtrain, 
+               
+              nfold = 5,
+              
+              eta = 0.3, 
+              max.depth = 5, #From analysis above
+              min_child_weight = 1, #From analysis above
+              gamma = gamma_vals[i], 
+              subsample = 0.9,
+              colsample_bytree =  0.9, 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 1, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error")
+  
+  auc_vec[i] <- bst_tune$evaluation_log$test_auc_mean[bst_tune$best_ntreelimit]
+  error_vec[i] <- bst_tune$evaluation_log$test_error_mean[bst_tune$best_ntreelimit]
+}
+```
+
+```{r gamam plot}
+res_db <- cbind.data.frame(gamma_vals, auc_vec, error_vec)
+res_db$gamma_vals <- as.factor(res_db$gamma_vals)
+names(res_db)[2:3] <- c("auc", "error") 
+
+ggplot(res_db, aes(x = gamma_vals, y = auc)) + 
+  geom_point(color = "darkgreen", size = 5) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(), 
+        panel.background = element_blank()) +  
+  labs(x = "Gamma",
+       y = "AUC")
+
+ggplot(res_db, aes(x = gamma_vals, y = error)) + 
+  geom_point(color = "darkgreen", size = 5) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(), 
+        panel.background = element_blank()) +  
+  labs(x = "Gamma",
+       y = "Error Rate")
+
+```
+
+```{r subsample colsample tune}
+
+#subsample <- c(0.7, 0.8, 0.9, 1) 
+#colsample_by_tree <- c(0.7, 0.8, 0.9, 1)
+
+subsample <- c(0.8, 0.9, 1) 
+colsample_by_tree <- c(0.8, 0.9, 1)
+
+cv_params <- expand.grid(subsample, colsample_by_tree)
+names(cv_params) <- c("subsample", "colsample_by_tree")
+
+auc_vec <- error_vec <- rep(NA, nrow(cv_params)) 
+
+set.seed(2345)
+for(i in 1:nrow(cv_params)){
+  
+  print(i)
+  
+  bst_tune <- xgb.cv(data = dtrain, 
+               
+              nfold = 5,
+              
+              eta = 0.3, 
+              max.depth = 5, 
+              min_child_weight = 1,  
+              gamma = 0.1, #From above
+              subsample = cv_params$subsample[i],
+              colsample_bytree =  cv_params$colsample_by_tree[i], 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 1, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error")
+  
+  auc_vec[i] <- bst_tune$evaluation_log$test_auc_mean[bst_tune$best_ntreelimit]
+  error_vec[i] <- bst_tune$evaluation_log$test_error_mean[bst_tune$best_ntreelimit]
+}
+```
+
+```{r subsample colsample plot}
+res_db <- cbind.data.frame(cv_params, auc_vec, error_vec)
+names(res_db)[3:4] <- c("auc", "error") 
+res_db$subsample <- as.factor(res_db$subsample)
+res_db$colsample_by_tree <- as.factor(res_db$colsample_by_tree) 
+
+ggplot(res_db, aes(y = subsample, x = colsample_by_tree, fill = auc)) + # set aesthetics
+  geom_tile() + # Use geom_tile for heatmap
+  theme_bw() + # Set theme
+  scale_fill_gradient2(low = "red", # Choose low color
+    mid = "white", # Choose mid color
+    high = "blue", # Choose high color
+    midpoint =mean(res_db$auc), # Choose mid point
+    space = "Lab", 
+    na.value ="grey", # Choose NA value
+    guide = "colourbar", # Set color bar
+    aesthetics = "fill") + # Select aesthetics to apply
+  labs(x = "Subsample", y = "Variables in Tree", fill = "AUC") # Set labels
+
+ggplot(res_db, aes(y = subsample, x = colsample_by_tree, fill = error)) + # set aesthetics
+  geom_tile() + # Use geom_tile for heatmap
+  theme_bw() + # Set theme
+  scale_fill_gradient2(low = "blue", # Choose low color
+    mid = "white", # Choose mid color
+    high = "red", # Choose high color
+    midpoint =mean(res_db$error), # Choose mid point
+    space = "Lab", 
+    na.value ="grey", # Choose NA value
+    guide = "colourbar", # Set color bar
+    aesthetics = "fill") + # Select aesthetics to apply
+  labs(x = "Subsample", y = "Variables / Tree", fill = "Error") # Set labels
+```
+
+
+```{r Tuned Model}
+set.seed(2345)
+bst_tuned <- xgboost(data = dtrain, 
+               
+              eta = 0.3, 
+              max.depth = 5, 
+              min_child_weight = 1, 
+              gamma = 0.1, #When combined with all other parameters 0.15 gives better results than 0.1 
+              subsample = 1,
+              colsample_bytree = 0.9, 
+               
+              nrounds = 2000, 
+              early_stopping_rounds = 200, 
+               
+              verbose = 0, 
+              nthread = num_threads, 
+              print_every_n = 500, 
+              
+              objective = "binary:logistic", 
+              eval_metric = "auc",
+              eval_metric = "error") 
+```
+
+```{r Tuned Prediction}
+
+bst_tuned_preds <- predict(bst_tuned, dtest)
+
+bst_tuned_pred_class <- rep(0, length(bst_tuned_preds))
+bst_tuned_pred_class[bst_tuned_preds >= 0.5] <- 1
+
+t <- table(bst_tuned_pred_class, test_db$profit) 
+
+confusionMatrix(t, positive = "1")
+```
+
+```{r Uncharted Data}
+uncharted_data <- data.frame(t(rep(0,length(total_data))))
+
+names(uncharted_data) <- names(total_data)
+
+uncharted_data[ ,c("Columbia_production",
+                   "Action",
+                   "Adventure",
+                   "is_vg",
+                   "Ruben_Fleischer_director",
+                   "Tom_Holland_actor",
+                   "Mark_Wahlberg_actor",
+                   "Antonio_Banderas_actor")] <- 1
+
+uncharted_data[ , c("duration", "budget")] <- t(c(120, 120*1000*1000))
+uncharted_data <- uncharted_data[ , -which(names(total_data) %in% c("profit"))]
+
+uncharted_matrix <- as.matrix(uncharted_data)
+```
+
+```{r Uncharetd Prediction}
+bst_uncharted_preds <- predict(bst_tuned, uncharted_matrix)
+bst_uncharted_preds
+
+```
+
+
+
+total

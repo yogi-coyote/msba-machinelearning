@@ -1,0 +1,453 @@
+---
+title: "Logisitic Regression Workbook and Assignment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Set Up
+
+To set up lets first load the packages which we will use for the analysis. These are `ggplot2`, `reshape2`, `plotmo`, and `glmnet`
+
+```{r Load Packages}
+# Uncomment below lines to install packages
+# install.packages("ggplot2"") # Install ggplot2
+# install.packages("reshape") # Install reshape2
+# install.packages("glmnet") # Install glmnet
+# install.packages("plotmo")
+library(ggplot2) # load ggplot
+library(reshape) # load reshape 2
+library(glmnet) # Load glmnet
+library(plotmo) # for plot_glmnet
+```
+
+For this analysis we will be analyzing breast cancer data. Worldwide, breast cancer is the most common type of cancer in women and the second highest in terms of mortality rates. Diagnosis of breast cancer is performed when an abnormal lump is found (from self-examination or x-ray) or a tiny speck of calcium is seen (on an x-ray). After a suspicious lump is found, the doctor will conduct a diagnosis to determine whether it is cancerous and, if so, whether it has spread to other parts of the body. 
+
+The objective of this analysis is to use tumor features to identify malignant tumors. Lets load out dataset into the working environment. It is called `breast_cancer_data.rda`. To load it in with the below command ensure your working directory is set to the file location. Alternatively you can use file->open file and then navigate to where the file is and load it in using that method.
+
+```{r Load Data}
+load("breast_cancer_data.rda")
+```
+
+To begin our analysis lets look at the start, end and dimension of the dataset. We will do this using the `head()`, `tail()`, and `dim()` commands to view the first 5 rows, last 5 rows, and dimension of the dataset respectively. 
+
+
+```{r view dat}
+head(bc_data) # View first five rows
+tail(bc_data) # View last five rows
+dim(bc_data) # View dimension
+```
+
+For this analysis we have 569 observations and 6 variables. The variables we have available for this analysis are:
+
+* mean_radius - Mean distance from center of tumor to perimeter of tumor
+* mean_texture - Standard deviation of grey-scale image of tumor
+* mean_perimeter - Mean size of the core tumor
+* mean_area - Mean area of the core tumor
+* mean_smoothness - Mean of local variation in  radius lengths
+* diagnosis - 1/0 indicating malignant/benign
+
+For this we will use the diagnosis variable as our response and the remaining variables as our explanatory variables. The other variables refer to the characteristics of the tumor in the image. The objective of this analysis is to identify characteristics of the images that can be used to identify malignant tumors. 
+
+## Analyse Data
+
+As a preliminary analysis we can visualize how the features vary for malignant and benign tumors. To do this we can use density plots to view the different distributions for each feature for malignant and benign tumors. 
+
+```{r Summary Plots}
+
+# Do densities
+plot_dat <- bc_data # Create data to use as plot data
+plot_dat$diagnosis <- as.factor(plot_dat$diagnosis) # Convert response to factor for plotting
+g_1 <- ggplot(plot_dat, aes(x = mean_radius, fill = diagnosis)) + # Set x as mean radius and fill as diagnosis
+  geom_density(alpha = 0.5) + # Select density plot and set transperancy (alpha)
+    theme_set(theme_bw(base_size = 22) ) + # Set theme and text size
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "Mean Radius", title = "Mean Radius - Malignant v Benign",
+       fill = "Diagnosis") + # Set labels
+  scale_fill_manual(values = c("1" = "red", "0" = "blue"), # Set fill colors manually
+                    labels = c("1" = "Malignant", "0" = "Benign")) # Set labels for fill
+g_1 # Generate plot
+
+g_2 <- ggplot(plot_dat, aes(x = mean_texture, fill = diagnosis)) + # Set x as mean texture and fill as diagnosis
+  geom_density(alpha = 0.5) + # Select density plot and set transperancy (alpha)
+    theme_set(theme_bw(base_size = 22) ) + # Set theme and text size
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "Mean Texture", title = "Mean Texture - Malignant v benign",
+       fill = "Diagnosis") + # Set labels
+  scale_fill_manual(values = c("1" = "red", "0" = "blue"), # Set fill colors manually
+                    labels = c("1" = "Malignant", "0" = "Benign")) # Set labels for fill
+g_2 # Generate plot
+
+g_3 <- ggplot(plot_dat, aes(x = mean_perimeter, fill = diagnosis)) + # Set x as mean perimeter and fill as diagnosis
+  geom_density(alpha = 0.5) + # Select density plot and set transperancy (alpha)
+    theme_set(theme_bw(base_size = 22) ) + # Set theme and text size
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "Mean Perimeter", title = "Mean Perimeter - Malignant v benign",
+       fill = "Diagnosis") + # Set labels
+  scale_fill_manual(values = c("1" = "red", "0" = "blue"), # Set fill colors manually
+                    labels = c("1" = "Malignant", "0" = "Benign")) # Set labels for fill
+g_3 # Generate plot
+
+g_4 <- ggplot(plot_dat, aes(x = mean_area, fill = diagnosis)) + # Set x as mean area and fill as diagnosis
+  geom_density(alpha = 0.5) + # Select density plot and set transperancy (alpha)
+    theme_set(theme_bw(base_size = 22) ) + # Set theme and text size
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "Mean Area", title = "Mean Area - Malignant v benign",
+       fill = "Diagnosis") + # Set labels
+  scale_fill_manual(values = c("1" = "red", "0" = "blue"), # Set fill colors manually
+                    labels = c("1" = "Malignant", "0" = "Benign")) # Set labels for fill
+g_4 # Generate plot
+
+g_5 <- ggplot(plot_dat, aes(x = mean_smoothness, fill = diagnosis)) + # Set x as mean smoothness and fill as diagnosis
+  geom_density(alpha = 0.5) + # Select density plot and set transperancy (alpha)
+    theme_set(theme_bw(base_size = 22) ) + # Set theme and text size
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "Mean Smoothness", title = "Mean Smoothness - Malignant v benign",
+       fill = "Diagnosis") + # Set labels
+  scale_fill_manual(values = c("1" = "red", "0" = "blue"), # Set fill colors manually
+                    labels = c("1" = "Malignant", "0" = "Benign")) # Set labels for fill
+g_5 # Generate plot
+
+```
+
+From the density plots we can see that in general the radius, perimeter and area of malignant tumors is generally smaller than benign. Similarly the texture and smoothness variables are generally smaller for malignant tumors though the separation is not as clear as for the other three variables. Another way we can visualize all of the variables at the same time is to use `geom_boxplot()` and `facet_wrap()` to create five plots on the same chart where we can view the differences for all variables at once. 
+
+
+```{r Box Plot}
+m_dat <- melt(plot_dat, id.vars = "diagnosis") # Melt data to long form
+m_dat$var_2 <- rep("radius", nrow(m_dat)) # Create nicer vector to store feature names
+m_dat$var_2[which(m_dat$variable == "mean_texture")] <- "texture" 
+m_dat$var_2[which(m_dat$variable == "mean_perimeter")] <- "perimeter" 
+m_dat$var_2[which(m_dat$variable == "mean_area")] <- "area"
+m_dat$var_2[which(m_dat$variable == "mean_smoothness")] <- "smoothness" 
+
+g_6 <- ggplot(m_dat, aes( y = value, x = diagnosis, fill = diagnosis)) + # Set x and fill as disagnosis, y as value
+  geom_boxplot() + # Use boxlot
+  facet_wrap(~var_2, scales = "free") + # Create small multiples
+    theme_bw() + # Set theme
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "Diagnosis", title = "Malignant v benign",
+       fill = "Diagnosis") + # Set labels
+  scale_fill_manual(values = c("1" = "red", "0" = "blue"), # Manually set fill values
+                    labels = c("1" = "Malignant", "0" = "Benign"))
+g_6 # Generate plot
+```
+The boxplots confirm our initial observations for the predictive power of the variables with malignant tumors generally having smaller values for all of the variables. 
+
+
+## Logistic Regression
+
+As we are working with a binary response we will use logistic regression for this analysis. We run a logistic regression using the `glm()` function, as logistic regression is a generalized linear model. To select linear regression we set our link function by setting `family = binomial(link = logit)`
+Lets try single variable logistic regressions first:
+
+```{r Log_reg_1}
+# Try mean area
+fit_1 <- glm(diagnosis ~ mean_area, # Set formula
+             family=binomial(link='logit'), # Set logistic regression
+             data= bc_data) # Set dataset
+summary(fit_1) # Sumamrize model
+
+# Try mean perimeter
+fit_2 <- glm(diagnosis ~ mean_perimeter, # Set formula 
+             family=binomial(link='logit'), # Set logistic
+             data= bc_data) # Set dataset
+summary(fit_2) # Sumamrize model
+
+# Try mean radius
+fit_3 <- glm(diagnosis ~ mean_radius, # Set formula
+             family=binomial(link='logit'), # Set logistic regression
+             data= bc_data) # Set dataset
+summary(fit_3) # Sumamrize model
+
+# Try mean smoothness
+fit_4 <- glm(diagnosis ~ mean_smoothness, # Set formula
+             family=binomial(link='logit'), # Set logistic regression
+             data= bc_data) # Set dataset
+summary(fit_4) # Sumamrize model
+
+# Try mean texture
+fit_5 <- glm(diagnosis ~ mean_texture, # Set formula
+             family=binomial(link='logit'), # Set logistic regression
+             data= bc_data) # Set dataset
+summary(fit_5) # Sumamrize model
+```
+
+The AIC for our single variable models is as follows:
+
+* mean_radius - 334.01
+* mean_texture - 650.52
+* mean_perimeter - 308.48
+* mean_area - 329.66
+* mean_smoothness - 677.95
+
+Therefore if we were to select just a single variable to use for predicting malignant/benign tumors, the best model and feature to use would be `mean_perimeter`.
+
+To examine the AIC lets add our variables one at a time to the model in order of their univariate AIC. 
+
+```{r log_reg_2}
+fit_6 <- glm(diagnosis ~ mean_perimeter , # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_6) # Sumamrize model
+fit_7 <- glm(diagnosis ~ mean_perimeter + mean_area , # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_7) # Sumamrize model
+fit_8 <- glm(diagnosis ~ mean_radius  + mean_perimeter + mean_area, # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_8) # Sumamrize model
+fit_9 <- glm(diagnosis ~ mean_radius + mean_texture + mean_perimeter + mean_area, # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_9) # Sumamrize model
+fit_10 <- glm(diagnosis ~ mean_radius + mean_texture + mean_perimeter + mean_area +  mean_smoothness, # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_10) # Sumamrize model
+```
+
+For these we can see that each of the features added demonstrates enough predictive power to justify its inclusion in the model with the AIC continuing to fall as we add features to the model. Lets try add some noise variables and see what happens to the AIC
+
+
+```{r Full logistic model}
+bc_data$noise_1 <- rnorm(n = nrow(bc_data))
+bc_data$noise_2 <- rnorm(n = nrow(bc_data))
+bc_data$noise_3 <- rnorm(n = nrow(bc_data))
+bc_data$noise_4 <- rnorm(n = nrow(bc_data))
+bc_data$noise_5 <- rnorm(n = nrow(bc_data))
+fit_11 <- glm(diagnosis ~ mean_radius + mean_texture + mean_perimeter + mean_area +  mean_smoothness +noise_1, # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_11) # Sumamrize model
+fit_12 <- glm(diagnosis ~ mean_radius + mean_texture + mean_perimeter + mean_area +  mean_smoothness +noise_1 + noise_2, # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_12) # Sumamrize model
+fit_13 <- glm(diagnosis ~ mean_radius + mean_texture + mean_perimeter + mean_area +  mean_smoothness +noise_1 + noise_2 + noise_3, # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_13) # Sumamrize model
+fit_14 <- glm(diagnosis ~ mean_radius + mean_texture + mean_perimeter + mean_area +  mean_smoothness +noise_1 + noise_2 + noise_3 + noise_4, # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_14) # Sumamrize model
+fit_15 <- glm(diagnosis ~ mean_radius + mean_texture + mean_perimeter + mean_area +  mean_smoothness +noise_1 + noise_2 + noise_3 + noise_4 + noise_5, # Set formula
+             family=binomial(link='logit'),# Set logistic Regression
+             data= bc_data) # Set dataset
+summary(fit_15) # Sumamrize model
+```
+
+Here we see that the AIC for our model steadily increased as we added more noise variables to our analysis. Indicating that it was not worth adding those features to the model.
+
+### Lasso Logistic Regression
+
+We can also apply the lasso for logistic regression. As we are taking a feature selection approach here, lets first standardize our data to have mean 0 and standard deviation 1. 
+
+```{r Lasso Logisitic}
+x_data <- as.data.frame(scale(bc_data[,-6])) # Scale dataset
+x_data$diagnosis <- bc_data$diagnosis                 
+```
+
+We can the run our lasso regression using the `glmnet()` command and setting `family = "binomial` to use a logistic regression model. Here we will not select the lambda value. We can the plot the size of the coefficients for different values of lambda, using `plot_glmnet()`.
+
+```{r log lasso 2}
+# Create x variables
+x_vars <- model.matrix(diagnosis ~., 
+                       x_data)[,-1]
+# Fit lasso model
+lasso_fit <- glmnet(x = x_vars, # Set explantory variables
+                    y = bc_data$diagnosis, # Set response variable
+                    alpha = 1, # Set alpha value
+                    family = "binomial")
+plot_glmnet(lasso_fit, # Plot lasso coefficients by lambda
+            xvar = "lambda")
+
+```
+
+We can see from the above plot that the noise coefficients are closest to zero and are first to converge to zero at low values of lambda, followed by radius. They are followed by smoothness and texture which makes sense considering the different predictive power of the variables we saw from our density plots. Mean perimeter and area are last to converge to zero. If we now the print out the coefficients the model will return the coefficients at different values of lambda. 
+
+```{r}
+# Print coefficients
+coef(lasso_fit)
+
+```
+
+
+We can also select the lambda value to use using cross-validation :
+```{r Lasso CV}
+set.seed(123)
+# Set sequence of lambda values
+lambda_seq <- 10^seq(4, -4, by = -.1)
+# Fit cross-validated lasso model
+cv.lasso <- cv.glmnet(x = x_vars, # Set x variables
+                 y = bc_data$diagnosis, # Set response variables
+                 alpha = 1, # Set alpha = 1 for lasso
+                 family = "binomial", # Set family as binomial for logistic regression
+                 lambda = lambda_seq, # Set lambda values to try
+                 nfolds = 10)
+best_lam <- cv.lasso$lambda.1se # Extract best lambda
+best_lam  # Print best lambda
+```
+
+We can then fit a lasso logistic regression using the calculated lambda by setting the lambda parameter. 
+
+```{r Fit lasso logistic final}
+lasso_fit_final <- glmnet(x = x_vars, # Set explantory variables
+                    y = bc_data$diagnosis, # Set response variable
+                    alpha = 1, # Set alpha as 1 for lasso
+                    family = "binomial", # Set as logistic regression
+                    lambda = best_lam) # Set lambda as best lambda
+```
+
+We can then compare our coefficients for both logistic and linear regression
+
+```{r Compare Coefficients}
+temp <- cbind.data.frame(coef(fit_15), as.vector(coef(lasso_fit_final))) # Join Coefficients from models
+names(temp) <- c("logisitic Regression", "Logistic Lasso") # Name coefficient columns
+rownames(temp) <- names(coef(fit_15)) # Add rownames to coefficients
+temp # Print coefficients
+```
+
+When we apply the Lasso logistic regression model we see that the coefficients for mean radius and mean area are now zero, indicating that they do not play a large role in determining if a tumor is malignant or benign. The variables for texture, perimeter and smoothness all have non-zero negative coefficients indicating that low values for texture, perimeter and smoothness are more likely to indicate a malignant tumor.
+
+
+# Assignment 2
+
+For this analysis we will be using churn data. The dataset is stored as `churn_data.rda` which can be loaded in by running the below command if the file is located in your working directory or else by accessing the file through file->open file
+
+```{r Load Data 2}
+load("churn_data.rda") # Load churn dataset
+```
+
+We can view a summary of this dataset by running `summary()`:
+
+```{r}
+summary(churn_data)
+```
+
+The variables we have are:
+
+* Gender - Whether the customer is a male or a female
+* SeniorCitizen - Whether the customer is a senior citizen or not (1,0)
+* Partner - Whether the customer has a partner or nor (Yes, No)
+* Dependents - Whether the customer has dependents or not (Yes, No)
+* tenure - Number of months the customer has stayed with the company
+* PhoneService - Whether the customer has a phone service of no (Yes, No)
+* MultipleLines - Whether the customer has multiple lines or not (Yes, No, No phone service)
+* InternetService - Customer's internet service provider (DSL, Fiber optic, No)
+* OnlineSecurity - Whether the customer has online security or not (Yes, No, No internet service)
+* OnlineBackup - Whether the customer has online backup or not (Yes, No, No internet service)
+* DeviceProtection - Whether the customer has tech support or not (Yes, No, No internet service)
+* StreamingTV - Whether the customer has streaming TV or not (Yes, No, No internet service)
+* StreamingMovies - Whether the customer has streaming movies or not (Yes, No, No internet service)
+* Contract - The contract term of the customer (Month-to-month, One year, Two year)
+* PaperlessBilling - Whether the customer has paperless billing or not (Yes, No)
+* PaymentMethod - The customer's payment method (Electronic CHECK, Mailed check, Bank transfer (automatic), Credit card (automatic))
+* MonthlyCharges - The amount charged to the customer monthly
+* TotalCharges - The total amount charged to the customer
+* Churn - Whether the customer churned or not (1 = Yes or 0 = No)
+
+
+The response variable for this dataset is `Churn`:
+
+```{r}
+summary(as.factor(churn_data$Churn))
+```
+
+For the assignment please carry out the following tasks/answer the following questions: (12 Points)
+
+
+* 1 - Create at least two visualizations potentially revealing factors with predictive power (2 Points)
+* 2 - Fit a logistic regression model to the data. (Remember you can use `resp ~.,` to include all explanatory variables in the model) (2 Points)
+* 3 - What features are significant in your logistic regression model? (1 Point)
+* 4 - What is the AIC of your logistic regression model?  (1 Point)
+* 5 - Add an interaction term to the logistic regression model? (1 Point)
+* 6 - Does the addition of the interaction term increase or decrease the AIC? What is the new AIC for the model? (1 Point)
+* 7 - Fit a lasso logistic regression model to the data. (1 Point)
+* 8 - Which coefficients were non-zero in the lasso model? Were they positive or negative? What does this imply? (1 Point)
+
+2 Points for analysis decisions and code quality.
+
+Please submit an an R-markdown document with the answers, optionally you can submit an R-script with the code used for your analysis and a document answering the specific questions, you can use word, pdf etc.
+
+Assignments can be submitted via Canvas or by email to mbarron2@nd.edu. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

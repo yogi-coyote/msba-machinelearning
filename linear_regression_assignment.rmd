@@ -1,0 +1,284 @@
+---
+title: Linear Regression Assignment
+author: Mendoza College of Business
+date: 10/19/2021
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set Up
+
+```{r}
+library(ggplot2)
+load("spotify.rda") # Load data
+```
+
+
+The dataset we are using contains spotify songs from 2017 to 2020, the features in the data are:
+
+* Song.Name - The name of the song. 
+
+* Artist - The artist who the song is by.
+
+* Popularity- The popularity of the track. The value will be between 0 and 100, with 100 being the most popular. The popularity of a track is a value between 0 and 100, with 100 being the most popular. The popularity is calculated by algorithm and is based, in the most part, on the total number of plays the track has had and how recent those plays are.
+
+* Danceability - Danceability describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least danceable and 1.0 is most danceable.
+
+* Energy - Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy. For example, death metal has high energy, while a Bach prelude scores low on the scale. Perceptual features contributing to this attribute include dynamic range, perceived loudness, timbre, onset rate, and general entropy.
+
+* Loudness - The overall loudness of a track in decibels (dB). Loudness values are averaged across the entire track and are useful for comparing relative loudness of tracks. Loudness is the quality of a sound that is the primary psychological correlate of physical strength (amplitude). Values typical range between -60 and 0 db.
+
+* Speechiness - Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value. Values above 0.66 describe tracks that are probably made entirely of spoken words. Values between 0.33 and 0.66 describe tracks that may contain both music and speech, either in sections or layered, including such cases as rap music. Values below 0.33 most likely represent music and other non-speech-like tracks.
+
+* Acousticness - A confidence measure from 0.0 to 1.0 of whether the track is acoustic. 1.0 represents high confidence the track is acoustic.
+
+* Liveness - Detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live. A value above 0.8 provides strong likelihood that the track is live.
+
+* Tempo - The overall estimated tempo of a track in beats per minute (BPM). In musical terminology, tempo is the speed or pace of a given piece and derives directly from the average beat duration.
+
+* Duration - The duration of the track in milliseconds.
+
+* Valence - A measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry).
+
+* Chord - The key the track is in.
+
+
+The objective of our analysis is to examine the characteristics of popular songs, so we will use `Popularity` as our response variable. 
+
+The song name and artist columns are unique identifiers for each of the rows in the data so we would want to leave them out when we are running models on the dataset:
+
+```{r}
+# Drop columns 1 and 2.
+spotify_data <- spotify[, c(3:13)]
+```
+
+
+# Assignment
+
+Please complete the following tasks and answer the following questions:
+```{r, eval=F, include=F}
+summary(spotify_data)
+```
+
+```{r, include=T}
+hist(spotify_data$Popularity)
+spotify_data$sq_Popularity <- spotify_data$Popularity ^ 2 # Squaring to fix negative skew
+hist(spotify_data$sq_Popularity)
+```
+
+
+
+* 1 - Create two visualizations which may reveal interesting relationships in the dataset. Describe what you see in the visualization. (2 Points) 
+
+
+```{r, eval=T, include=T}
+ggplot(spotify_data, 
+       aes(x = Loudness , 
+           y = sq_Popularity)
+       ) +
+  geom_point() +
+  geom_smooth(method = lm) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()
+        ) 
+```
+  
+There is positive correlation between Loudness and Popularity, meaning the louder the song the more popular it could be.
+
+
+```{r}
+ggplot(spotify_data,
+       aes(x = Chord, y = sq_Popularity)
+       ) +
+  geom_boxplot(alpha = 0.3) +
+  theme_minimal()
+```
+  
+Chord D#/Eb stands out among all the chords as being most popular on average.
+
+* 2 - Run a linear regression model on the dataset using `Popularity` as the response variable and all other variables in the model data as explanatory variables. (1 Point)
+
+```{r}
+#names(spotify_data)
+lm_popularity <- lm(sq_Popularity ~ 
+                      Danceability 
+                    + Energy 
+                    + Loudness 
+                    + Speechiness 
+                    + Acousticness 
+                    + Liveness 
+                    + Tempo 
+                    + Duration 
+                    + Valence 
+                    + Chord, 
+                    data = spotify_data)
+
+summary(lm_popularity)
+```
+
+
+
+* 3 - What features in the model were significant (At 10% level)? Do these variables have a positive or negative effect on a songs popularity? (1 Point)
+```{r}
+lm_popularity$coefficients[c("Loudness", "Speechiness", "Liveness", "Duration", "ChordD#/Eb")]
+```
+
+
+  
+Loudness - Positive effect  
+Speechiness - Negative effect  
+Liveness - Negative effect  
+Duration - Positive effect  
+ChordD#/Eb - Positive effect  
+
+
+* 4 - Visualize two potential interaction terms and their relationship with the response variable. Are these interaction terms likely to have a significant relationship with the response variable? (2 Points)
+
+```{r}
+ggplot(spotify_data, 
+       aes(x = (Energy * Tempo ) , 
+           y = sq_Popularity)
+       ) +
+  geom_point() +
+  geom_smooth(method = lm) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()
+        ) 
+```
+
+
+```{r}
+ggplot(spotify_data, 
+       aes(x = (Acousticness * Valence) , 
+           y = sq_Popularity)
+       ) +
+  geom_point() +
+  geom_smooth(method = lm) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()
+        ) 
+```  
+  
+Both the interaction terms have some effect on the response variable. The effect is not very strong, but no predictor variable has significantly better effect.
+
+* 5 - Fit a linear regression model with the two interaction terms included. (1 Point)
+
+```{r}
+#names(spotify_data)
+lm_popularity_i <- lm(sq_Popularity ~ 
+                      Danceability 
+                    + Energy 
+                    + Loudness 
+                    + Speechiness 
+                    + Acousticness 
+                    + Liveness 
+                    + Tempo 
+                    + Duration 
+                    + Valence 
+                    + Chord
+                    + (Energy * Tempo)
+                    + (Acousticness * Valence), 
+                    data = spotify_data)
+
+
+summary(lm_popularity_i)
+```
+
+
+* 6 - How has the inclusion of the interaction terms affected the coefficients in the model? How has the inclusion of interaction terms affected the model fit? (1 Point)
+
+Few coefficients increased while others decreased. The coefficient of the most significant variable, Loudness, had one of the least changes. Acousticness had the biggest change, going from -1.931e+02 to 7.207e+02.
+
+The model with the interaction terms has a better fit. R-squared increased from 0.05734 to 0.06159. The increase is not a lot but the linear model itself is a bad fit for the data. 
+
+2 Points for code quality and analysis decisions.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

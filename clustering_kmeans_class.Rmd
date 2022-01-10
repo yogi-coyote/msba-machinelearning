@@ -1,0 +1,962 @@
+---
+title: "Clustering 2 - K-means"
+author: "Machine Learning"
+date: "9 September 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r Load Packages}
+# install.packages("tidyr")
+# install.packages("cluster")
+# install.packages("factoextra")
+# install.packages("sparcl")
+# install.packages(teamcolors)
+# install.packages("ggimage")
+# install.packages("ggdark")
+library(tidyr) # Load tidyr
+library(cluster) # Load cluster
+library(factoextra) # clustering algorithms & visualization
+library(sparcl) # Sparse Clustering
+library(teamcolors) # Load team colors
+library(ggimage) # Load ggimage
+library(ggdark) # Load ggdark
+```
+
+## Introduction
+
+The data we are going to use for this analysis is college football summary data for 2019. The data contains statistics for each team and the plays they run at a season level. The data is broken down by play type and contains information on the EPA per play type, the frequency each play is run, and the proportion of times each play is chosen. We have data for overall and separated by down. 
+
+Lets load the data into the workspace, the data is stored as `cfb_off_dat_2020.rda`. The dataset corresponds to offensive statistics.
+
+```{r Load Data}
+load("cfb_off_dat_2020.rda")
+```
+
+Lets view the data:
+
+```{r View Data}
+head(off_dat) # View first few rows of data
+tail(off_dat) # View last few rows of data
+dim(off_dat) # View dimensions of data
+```
+
+We see that for both offensive and defensive data we have 68 samples, 1 variable which corresponds to team name and 28 variables corresponding to explanatory variables. We can view a summary of this data by running `summary()`:
+
+```{r}
+summary(off_dat) # Summarize offensive data
+```
+
+From this we see that we have no missing values in the data. The variables correspond to six different play types:
+
+* Kick offs
+* Rushes
+* Passes
+* Punts
+* Fumbles
+* Field Goals
+
+## Initial Visualizations
+
+Let's visualize some of the EPA stats for each of the plays in the dataset:
+
+```{r}
+# Merge logos and data
+plot_dat <- merge(off_dat, cfb_logos, by.x = "teams", by.y = "school")
+```
+
+First let's look at the EPA per rush and rush frequency per game:
+
+```{r}
+# Create plot
+g_1 <- ggplot(plot_dat, # Set dataset 
+              aes(x = Rush_freq_per_game, y = Rush_avg_epa)) + # Set aesthetics
+  geom_point(alpha = 0.3) + # Set geom point
+  geom_image(image = plot_dat$logos, asp = 16/9) + # Add logos
+  labs(y = "Average EPA per Rush", # Add labels
+       x = "Rush Frequency per Game",
+       title = "EPA per Rush v Rush Frequency per Game",
+       subtitle = "CFB - 2020 Season") +
+  dark_theme_bw() + # Set theme
+  theme( # Modify plot elements
+    axis.text = element_text(size = 10), # Change Axis text size
+    axis.title.x = element_text(size = 12), # Change x axis title size
+    axis.title.y = element_text(size = 12), # Change y axis title size 
+    plot.title = element_text(size = 16), # Change plot title size
+    plot.subtitle = element_text(size = 14), # Change plot subtitle size
+    plot.caption = element_text(size = 10), # Change plot caption size
+    panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) # Remove grid
+# Generate plot
+g_1
+# Turn off dark mode
+invert_geom_defaults()
+```
+
+Next let's look at pass plays:
+
+```{r}
+# Create plot
+g_2 <- ggplot(plot_dat, # Set dataset
+              aes(x = Pass_freq_per_game, y = Pass_avg_epa)) + # Set aesthetics
+  geom_point(alpha = 0.3) +  # Set geom point
+  geom_image(image = plot_dat$logos, asp = 16/9) + # Add logos
+  labs(y = "Average EPA per Pass", # Add labels
+       x = "Pass Frequency per Game",
+       title = "EPA per Pass v Pass Frequency per Game",
+       subtitle = "CFB - 2020 Season") +
+  dark_theme_bw() + # Set theme
+  theme( # Modify plot elements
+    axis.text = element_text(size = 10), # Change Axis text size
+    axis.title.x = element_text(size = 12), # Change x axis title size
+    axis.title.y = element_text(size = 12), # Change y axis title size 
+    plot.title = element_text(size = 16), # Change plot title size
+    plot.subtitle = element_text(size = 14), # Change plot subtitle size
+    plot.caption = element_text(size = 10), # Change plot caption size
+    panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) # Remove grid
+# Generate plot
+g_2
+# Turn off dark mode
+invert_geom_defaults()
+```
+
+Now let's just look at EPA earned on passes and rushes:
+
+```{r}
+# Create plot
+g_3 <- ggplot(plot_dat, # Set dataset
+              aes(x = Rush_avg_epa, y = Pass_avg_epa)) + # Set aesthetics
+  geom_point(alpha = 0.3) +  # Set geom point
+  geom_image(image = plot_dat$logos, asp = 16/9) + # Add logos
+  labs(y = "Average EPA per Pass", # Add labels
+       x = "Average EPA per Rush",
+       title = "EPA per Pass v EPA per Rush",
+       subtitle = "CFB - 2020 Season") +
+  dark_theme_bw() + # Set theme
+  theme( # Modify plot elements
+     axis.text = element_text(size = 10), # Change Axis text size
+    axis.title.x = element_text(size = 12), # Change x axis title size
+    axis.title.y = element_text(size = 12), # Change y axis title size 
+    plot.title = element_text(size = 16), # Change plot title size
+    plot.subtitle = element_text(size = 14), # Change plot subtitle size
+    plot.caption = element_text(size = 10), # Change plot caption size
+    panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank())
+# Generate plot
+g_3
+# Turn off dark mode
+invert_geom_defaults()
+```
+
+Now let's just look at first down plays:
+
+```{r}
+# Create plot
+g_4 <- ggplot(plot_dat, # Set dataset
+              aes(x = Rush_avg_epa_first_down, y = Pass_avg_epa_first_down)) + # Set aesthetics
+  geom_point(alpha = 0.3) +  # Set geom point
+  geom_image(image = plot_dat$logos, asp = 16/9) + # Add logos
+  labs(y = "Average EPA per Pass", # Add labels
+       x = "Average EPA per Rush",
+       title = "EPA per Pass v EPA per Rush - First Down",
+       subtitle = "CFB - 2020 Season") +
+  dark_theme_bw() + # Set theme
+  theme( # Modify plot elements
+     axis.text = element_text(size = 10), # Change Axis text size
+    axis.title.x = element_text(size = 12), # Change x axis title size
+    axis.title.y = element_text(size = 12), # Change y axis title size 
+    plot.title = element_text(size = 16), # Change plot title size
+    plot.subtitle = element_text(size = 14), # Change plot subtitle size
+    plot.caption = element_text(size = 10), # Change plot caption size
+    panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank())
+# Generate plot
+g_4
+# Turn off dark mode
+invert_geom_defaults()
+```
+
+
+## Clustering Preparation
+
+Note that the values for the frequency per game, EPA per game and proportion per game are all on quite different scales. To ensure that our clustering algorithm pays equal attention to all of our variables we will scale the data in advance. We can do this running the `scale()` command. As the team names are in the data and are a character vector we will leave them out of the scaling and then add them back to our dataset:
+
+```{r Scale Data}
+# Scale offensive data
+off_dat_2 <- scale(off_dat[,2:20])
+# Add teams back to data frame
+off_dat <- cbind.data.frame(off_dat$teams, off_dat_2)
+# Fix name of team column
+names(off_dat)[1] <- "teams"
+```
+
+
+We are now ready to cluster our data. 
+
+
+## Initial Clustering
+
+For our initial clustering lets try to fit four clusters to the data. To run K-means on our data we use the `kmeans()` function. The parameters we need to set for the K-means algorithm are:
+
+* x - The data we want the algorithm to cluster
+* centers -  The number of clusters to generate. 
+* itermax - The number of iterations to let k-means perform
+* nstart - The number of starts to try for K-means. Remember K-means may not converge to the optimal solution from a single start point. Therefore we may want to try multiple start points. 
+
+
+```{r fit kmeans}
+set.seed(12345) # Set seed for reproducibility
+fit_1 <- kmeans(x = off_dat[,2:20], # Set data as explanatory variables 
+                centers = 4,  # Set number of clusters
+                nstart = 25, # Set number of starts
+                iter.max = 100 ) # Set maximum number of iterations to use
+```
+
+The results of our clustering is stored in `fit_1`. We can extract the clusters and center values for this as follows:
+
+```{r Extract results}
+# Extract clusters
+clusters_1 <- fit_1$cluster
+# Extract centers
+centers_1 <- fit_1$centers
+
+```
+
+Lets first check how many samples have ended up in each cluster:
+
+```{r Check cluster numbers}
+# Check samples per cluster
+summary(as.factor(clusters_1))
+
+```
+
+Here we see that we have 3 samples in cluster 1, 25 in cluster 2, 17 in cluster 3, and 21 in cluster 4. We can view the teams in each cluster as follows:
+
+```{r Check teams per cluster}
+# Check teams in cluster 1
+cat("Cluster 1 teams:\n")
+off_dat$teams[clusters_1 == 1]
+# Check teams in cluster 2
+cat("Cluster 2 teams:\n")
+off_dat$teams[clusters_1 == 2]
+# Check teams in cluster 3
+cat("Cluster 3 teams:\n")
+off_dat$teams[clusters_1 == 3]
+# Check teams in cluster 4
+cat("Cluster 4 teams:\n")
+off_dat$teams[clusters_1 == 4]
+```
+
+
+Lets check how the center values for each of the clusters compare to each other. To make this interpret-able lets just use the overall game level values:
+
+```{r}
+# Create vector of clusters
+cluster <- c(1: 4)
+# Extract centers
+center_df <- data.frame(cluster, centers_1)
+
+# Reshape the data
+center_reshape <- gather(center_df, features, values, Pass_freq_per_game:Rush_prop_per_game_third_down)
+# View first few rows
+head(center_reshape)
+
+# Create plot
+g_heat_1 <- ggplot(data = center_reshape, # Set dataset
+                   aes(x = features, y = cluster, fill = values)) + # Set aesthetics
+  scale_y_continuous(breaks = seq(1, 4, by = 1)) + # Set y axis breaks
+  geom_tile() + # Geom tile for heatmap
+  coord_equal() +  # Make scale the same for both axis
+  theme_set(theme_bw(base_size = 22) ) + # Set theme
+  scale_fill_gradient2(low = "blue", # Choose low color
+                       mid = "white", # Choose mid color
+                       high = "red", # Choose high color
+                       midpoint =0, # Choose mid point
+                       space = "Lab", 
+                       na.value ="grey", # Choose NA value
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  coord_flip() # Rotate plot to view names clearly
+# Generate plot
+g_heat_1
+```
+
+From this we can see that cluster 1 generally ran the ball more and passed less. Cluster 2 was more effective about passing and rushing, while cluster 3 were generally worse at both passing and rushing the ball but passed the ball far more than the others. 
+
+
+### Calculate cluster number
+
+Perhaps four is not the optimal cluster number for this dataset. Lets try a few different cluster values and view the error for each different number. Remember that the error will always decrease as we add more clusters so that we are looking for the point where the rate of improvement in performance starts to decrease.Ideally this plot will look like:
+
+![Ideal Elbow Plot](elbow_plot.png)
+
+I have found that in reality a plot this clear is rarely found and it often be best to choose the number of clusters based on the needs of the analysis. Let's create it anyway and see what it looks like for this dataset:
+
+
+```{r Check Cluster Number}
+# Create function to try different cluster numbers
+kmean_withinss <- function(k) {
+  cluster <- kmeans( x = off_dat[,2:20],  # Set data to use
+                    centers = k,  # Set number of clusters as k, changes with input into function
+                    nstart = 25, # Set number of starts
+                    iter.max = 100) # Set max number of iterations
+  return (cluster$tot.withinss) # Return cluster error/within cluster sum of squares
+}
+
+
+# Set maximum cluster number
+max_k <-20
+# Run algorithm over a range of cluster numbers 
+wss <- sapply(2:max_k, kmean_withinss)
+
+
+# Create a data frame to plot the graph
+elbow <-data.frame(2:max_k, wss)
+
+# Plot the graph with ggplot
+g_e1 <- ggplot(elbow, # Set dataset
+              aes(x = X2.max_k, y = wss)) + # Set aesthetics
+  theme_set(theme_bw(base_size = 22) ) + # Set theme
+  geom_point(color = "blue") + # Set geom point for scatter
+  geom_line() + # Geom line for a line between points
+  scale_x_continuous(breaks = seq(1, 20, by = 1)) + # Set breaks for x-axis
+  labs(x = "Number of Clusters", y="Within Cluster \nSum of Squares") + # Set labels
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+# Generate plot
+g_e1
+
+```
+
+This is a pretty tough plot to decide what cluster number to choose. Let's try 6 clusters and see what results we get: 
+
+```{r run kmeans 2}
+set.seed(12345) # Set seed for reproducibility
+fit_2 <- kmeans(x = off_dat[2:20], # Set data as explanatory variables 
+                centers = 6,  # Set number of clusters
+                nstart = 25, # Set number of starts
+                iter.max = 100 ) # Set maximum number of iterations to use
+
+# Extract clusters
+clusters_2 <- fit_2$cluster
+# Extract centers
+centers_2 <- fit_2$centers
+```
+
+```{r Check cluster numbers 2}
+# Check samples per cluster
+summary(as.factor(clusters_2))
+
+```
+
+ Lets check the teams in each cluster:
+
+```{r}
+# Check teams in cluster 1
+cat("Cluster 1 teams:\n")
+off_dat$teams[clusters_2 == 1]
+# Check teams in cluster 2
+cat("Cluster 2 teams:\n")
+off_dat$teams[clusters_2 == 2]
+# Check teams in cluster 3
+cat("Cluster 3 teams:\n")
+off_dat$teams[clusters_2 == 3]
+# Check teams in cluster 4
+cat("Cluster 4 teams:\n")
+off_dat$teams[clusters_2 == 4]
+# Check teams in cluster 5
+cat("Cluster 5 teams:\n")
+off_dat$teams[clusters_2 == 5]
+# Check teams in cluster 6
+cat("Cluster 6 teams:\n")
+off_dat$teams[clusters_2 == 6]
+```
+
+From this it looks like many of the better teams are contained in cluster 5, with other top tier teams in cluster 2. 
+
+Lets check the quality of our clustering solution using a silhouette plot:
+
+```{r Quality Check}
+# Calculate distance between samples
+dis = dist(off_dat[2:20])^2
+# Set plotting parameters to view plot
+op <- par(mfrow= c(1,1), oma= c(0,0, 3, 0),
+          mgp= c(1.6,.8,0), mar= .1+c(4,2,2,2))
+# Create silhouette for k=4
+sil = silhouette (fit_1$cluster , # Set clustering
+                  dis, # Set distance 
+                  full = TRUE) # Generate silhouette for all samples
+# Generate silhouette plot
+plot(sil)
+
+# Create silhouette plot for k=6
+sil = silhouette (fit_2$cluster , # Set clustering 
+                  dis, # Set distance
+                  full = TRUE) # Generate for all samples
+# Generate plot
+plot(sil)
+
+
+
+```
+
+From this we see that the silhouette plot for the first clustering has issues with both cluster 3 and cluster 4. For the clustering with k=6 both cluster 3 and 5 appear to have samples that do not belong in that cluster. 
+
+
+## Checking Clustering Quality
+
+
+### Is my clustering okay
+
+The first question we want to ask when checking clustering is to examine if we have a good clustering solution. This is not a rigorous process as there is no ground 'truth' to check our result against. We can analyse our clustering solution using:
+
+* Visual Inspection
+* Clustering Cardinality - Number of samples in each cluster
+* Clustering Magnitude - Sum of distances of points to cluster center
+
+
+```{r Clustering Cardinality}
+
+plot_clust_cardinality <- cbind.data.frame(clusters_1, clusters_2) # Join clusters with  k =4 and k=6
+
+names(plot_clust_cardinality) <- c("k_4", "k_6") # Set names
+
+# Create bar plots
+g_2 <- ggplot(plot_clust_cardinality, aes( x = factor(k_4))) + # Set x as cluster values
+  geom_bar(stat = "count", fill = "steelblue") + # Use geom_bar with stat = "count" to count observations
+    labs(x = "Cluster Number", y="Points in Cluster", # Set labels
+         title = "Cluster Cardinality (k = 4)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+
+g_3 <- ggplot(plot_clust_cardinality, aes( x = factor(k_6))) + # Set x as cluster values
+  geom_bar(stat = "count", fill = "steelblue") + # Use geom_bar with stat = "count" to count observations
+    labs(x = "Cluster Number", y="Points in Cluster", # Set labels
+         title = "Cluster Cardinality (k = 6)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+# Generate bar plots
+g_2
+g_3
+```
+
+Here we are looking for clusters that are major outliers. When k=4, cluster 1 has a lot less points than the other clusters and would warrant investigation. From our previous print out of the teams in each cluster we can see that this cluster corresponds to the military academies who may have a distinct play style. The corresponding cluster for these teams when k=6 is cluster 4. Here however, we should also look at cluster 1 which contains just two observations, "Mississippi State" and "Purdue" . 
+
+Next we want to visualize the within cluster sum of squares for each cluster to see how good a fit each of the clusters was fit. This is also called cluster magnitude.
+
+```{r Check Cluster Magnitude}
+k_4_mag <- cbind.data.frame(c(1:4), fit_1$withinss) # Extract within cluster sum of squares
+
+names(k_4_mag) <- c("cluster", "withinss") # Fix names for plot data
+
+
+# Create bar plot
+g_4 <- ggplot(k_4_mag, aes(x = cluster, y = withinss)) + # Set x as cluster, y as withinss
+  geom_bar(stat = "identity", fill = "steelblue") + # Use geom bar and stat = "identity" to plot values directly
+   labs(x = "Cluster Number", y="Total Point to Centroid Distance", # Set labels
+         title = "Cluster Magnitude (k = 4)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+  
+k_6_mag <- cbind.data.frame(c(1:6), fit_2$withinss) # Extract within cluster sum of squares
+names(k_6_mag) <- c("cluster", "withinss") # Fix names for plot data
+
+# Create bar plot
+g_5 <- ggplot(k_6_mag, aes(x = cluster, y = withinss)) +  # Set x as cluster, y as withinss
+  geom_bar(stat = "identity", fill = "steelblue") + # Use geom bar and stat = "identity" to plot values directly
+   labs(x = "Cluster Number", y="Total Point to Centroid Distance", # Set labels
+         title = "Cluster Magnitude (k = 6)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+# Generate plots
+g_4
+g_5
+```
+
+When we have k=4, cluster 2 and 4 have a similar within cluster sum of squares while there is a far smaller value for cluster 1 with the military academies, while cluster 3 has the highest value. When k=6, clusters 1 and 4 have a a quite low value for within cluster sum of squares since they only contain two and three samples respectively. However, clusters 2 and 5 also have a smaller value than 3 and 6. 
+
+From the above plots we can deduce that clusters with a higher number of samples are likely to have a higher within cluster sum of squares and vice versa. We can plot these two values against each other to see the relationship. 
+
+```{r Magnitude v Caardinality}
+k_4_dat <- cbind.data.frame(table(clusters_1), k_4_mag[,2]) # Join magnitude and cardinality
+
+names(k_4_dat) <- c("cluster", "cardinality", "magnitude") # Fix plot data names
+
+# Create scatter plot
+g_6 <- ggplot(k_4_dat, aes(x = cardinality, y = magnitude, color = cluster)) + # Set aesthetics
+  geom_point(alpha = 0.8, size  = 4) +  # Set geom point for scatter
+ geom_smooth(aes(x = cardinality, y = magnitude), method = "lm",
+              se = FALSE, inherit.aes = FALSE, alpha = 0.5) + # Set trend  line
+  labs(x = "Cluster Cardinality", y="Total Point to Centroid Distance", # Set labels
+         title = "Cluster Magnitude vs Cardinality \n(k = 4)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+
+k_6_dat <- cbind.data.frame(table(clusters_2), k_6_mag[,2]) # Join magnitude and cardinality
+
+names(k_6_dat) <- c("cluster", "cardinality", "magnitude") # Fix plot data names
+
+# Create scatter plot
+g_7 <- ggplot(k_6_dat, aes(x = cardinality, y = magnitude, color = cluster)) + # Set aesthetics
+  geom_point(alpha = 0.8, size = 4) +  # Set geom point for scatter
+  geom_smooth(aes(x = cardinality, y = magnitude), method = "lm",
+              se = FALSE, inherit.aes = FALSE, alpha = 0.5) + # Set trend  line
+  labs(x = "Cluster Cardinality", y="Total Point to Centroid Distance", # Set labels
+         title = "Cluster Magnitude vs Cardinality \n(k = 6)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+# Generate scatter plots
+g_6
+g_7
+```
+
+We can find anomalous clusters by looking for points where the cardinality does not correlate with magnitude relative to the other clusters in the dataset, i.e. is far from the fitted line. For the clustering when k=4 we see a few points that are quite far off the fitted line, while when k=6 the samples fit more closely.
+
+
+If we find problems at this step we can take the following actions 
+
+* Scale data - Data already scaled
+* Correct similarity measure - Will check in next step
+* Check data operations are meaningful - Ask is k-means meaningful for this data
+* Check the clustering algorithm assumptions match up to data
+
+K-means makes two assumptions about the data:
+
+1. The clusters are spherical in high dimensional space
+2. The clusters are of equal size
+
+While the first assumption is likely satisfied by this dataset, from our results we can see that the second assumption is likely violated. One method of proceeding here would be to drop the military academies from our analysis. 
+
+
+
+### Is the Similarity Measure Suitable
+
+To check if we have chosen a suitable similarity measure we can analyse samples in the dataset that are known to be similar and dissimilar. We can calculate the similarity measures for these points and check that the similarity measure is quantifying the similarities between these points as expected. 
+
+Lets check the distance between some teams to see how this looks. Lets focus on Clemson, Alabama, Notre, Stanford, and Army. We would expect that Clemson and Alabama are quite similar, that Notre Dame and Stanford are quite similar, that Notre Dame is reasonably similar to Clemson, though likely less so than Alabama, and that Army is quite distinct from the other teams. 
+
+```{r Check distance}
+cat("Clemson v Alabama")
+dist(off_dat[off_dat$teams %in% c("Clemson", "Alabama" ),2:20])[1]
+cat("Clemson v Notre Dame")
+dist(off_dat[off_dat$teams %in% c("Clemson", "Notre Dame" ),2:20])[1]
+cat("Clemson v Army")
+dist(off_dat[off_dat$teams %in% c("Clemson",  "Army"),2:20])[1]
+cat("Notre Dame v Army")
+dist(off_dat[off_dat$teams %in% c("Notre Dame",  "Army"),2:20])[1]
+cat("Notre Dame v Stanford")
+dist(off_dat[off_dat$teams %in% c("Notre Dame",  "Stanford"),2:20])[1]
+
+```
+
+These distances appear pretty close to what we would expect from the data, so we can conclude that our distance measure is working correctly. If these distances were not as expected we would need to reconsider the distance measure that we are using.
+
+
+
+### Do we have the optimum number of clusters
+
+A final thing to check is the number of clusters in our data. Here we have already taken advantage of the elbow method to evaluate the number of clusters in our dataset and visualized the structure of the clustering using the silhouette plot. Both are useful techniques for this area. The suggested diagnostic measures for checking the optimum number of clusters are:
+
+* Check clustering of similar and dissimilar examples
+* Plot error vs number of clusters to find optimum number of clusters - Elbow method
+
+We can then check the clustering of our similar and dissimilar observations:
+
+```{r Check clustering}
+# Join data and clustering solution for K=4 for select teams
+k_4_sol <- cbind.data.frame(off_dat$teams[off_dat$teams %in% c("Alabama", "Army", "Clemson",
+                                                               "Notre Dame", "Stanford")],
+                            clusters_1[off_dat$teams %in% c("Alabama", "Army", "Clemson",
+                                                               "Notre Dame", "Stanford")])
+# Set names on new dataset
+names(k_4_sol) <- c("team", "cluster")
+cat("When K = 4:")
+print(k_4_sol) # Print results
+
+# Join data and clustering solution for K=6 for select teams
+k_6_sol <- cbind.data.frame(off_dat$teams[off_dat$teams %in% c("Alabama", "Army", "Clemson",
+                                                               "Notre Dame", "Stanford")],
+                            clusters_2[off_dat$teams %in% c("Alabama", "Army", "Clemson",
+                                                               "Notre Dame", "Stanford")])
+# Set names on new dataset
+names(k_6_sol) <- c("team", "cluster")
+cat("When K = 6:")
+print(k_6_sol) # Print results
+```
+
+These look pretty good, however, it is interesting to note that Stanford/Clemson and Notre Dame end up in different clusters for K=6 even though they are quite similar to each other. This may indicate that we have too many clusters in the data if we want Notre Dame and Stanford to be in the same cluster, or that there are too few if we expect Notre Dame and Clemson/Alabama to be in different clusters. 
+
+The remedies for this problem are:
+
+* If similar examples are in different clusters then there may be too many clusters in the data
+* If dissimilar examples are in the same cluster then there may be too few clusters
+* Using the plot of cluster number vs error choose number of clusters where reduction in error begins to decrease
+
+
+# Improving clustering:
+
+Lets try clustering the data excluding the military academies:
+
+```{r Drop Military}
+# Drop small cluster samples
+off_dat_2 <- off_dat[!off_dat$teams %in% c("Army", "Air Force", "Navy"),]
+```
+
+Next visualize the number of clusters that is now optimum for the dataset:
+
+```{r vis clus num 2}
+# Create function to try different cluster numbers
+kmean_withinss <- function(k) {
+  cluster <- kmeans( x = off_dat_2[,2:20],  # Set data to use
+                    centers = k,  # Set number of clusters as k, changes with input into function
+                    nstart = 25, # Set number of starts
+                    iter.max = 100) # Set max number of iterations
+  return (cluster$tot.withinss) # Return cluster error/within cluster sum of squares
+}
+
+
+# Set maximum cluster number
+max_k <-20
+# Run algorithm over a range of cluster numbers 
+wss <- sapply(2:max_k, kmean_withinss)
+
+
+# Create a data frame to plot the graph
+elbow <-data.frame(2:max_k, wss)
+
+# Plot the graph with ggplot
+g_8 <- ggplot(elbow, aes(x = X2.max_k, y = wss)) +
+  theme_set(theme_bw(base_size = 22) ) +
+  geom_point(color = "blue") +
+  geom_line() +
+  scale_x_continuous(breaks = seq(1, 20, by = 1)) +
+  labs(x = "Number of Clusters", y="Within Cluster \nSum of Squares") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+g_8
+```
+
+Again this is pretty uninformative, lets try using some other methods for choosing cluster number. For these we can use:
+
+1. Average silhouette width 
+2. The gap statistic
+
+The average silhouette width uses the silhouette measure we have been using previously and uses the average width as a measure of error. The Gap statistic compares the inter cluster variation for different values of K with their expected values if there was no obvious clustering in the data. It works by generating random values for each variable, clustering them and then comparing the within cluster sum of squares to the clustering solution on the original data. 
+
+The gap statistic process is:
+
+1. Cluster the data with different values of k, calculate the within cluster sum of squares
+2. Generate B bootstrap datasets with random values for each observation, where the random values fall within the minimum and maximum values of the observed data. Compute the within cluster sum of squares. 
+3. Calculate deviation between random and observed data clusterings. (Gap Statistic)
+4. Choose smallest k such that the gap statistic for k is less than 1 standard deviation from the highest gap statistic value. 
+
+
+We can plot the silhouette value for multiple different numbers of clusters using `fviz_nbclust()`:
+```{r}
+# Create silhouette plot summary
+fviz_nbclust(off_dat_2[,2:20], # Set dataset
+             kmeans,# Set clustering method
+             method = "silhouette") # Set evaluation method
+```
+
+From the silhouette plot we see that the optimal number of clusters is 2, though 6 or 9 may be an alternate choice. 
+
+To calculate the gap statistic we run the following:
+
+```{r Gap stat}
+# compute gap statistic
+set.seed(999999)
+gap_stat <- clusGap(off_dat_2[,2:20], FUN = kmeans, nstart = 25,
+                    K.max = 20, B = 50)
+# Print the result
+print(gap_stat, method = "firstmax")
+# Visualize Result
+fviz_gap_stat(gap_stat)
+```
+
+From the gap statistic, we get an optimum number of clusters as 2, which does not work well for analysis. Often the choice of optimal cluster number is a combination of both statistical results and analysis requirements. We will proceed with k as 2, using the silhouette plot. 
+
+```{r Run K-means 3}
+set.seed(12345) # Set seed for reproducibility
+fit_3 <- kmeans(x = off_dat_2[2:20], # Set data as explanatory variables 
+                centers = 2,  # Set number of clusters
+                nstart = 25, # Set number of starts
+                iter.max = 100 ) # Set maximum number of iterations to use
+
+# Extract clusters
+clusters_3 <- fit_3$cluster
+# Extract centers
+centers_3 <- fit_3$centers
+
+# Check samples per cluster
+summary(as.factor(clusters_3))
+```
+
+Lets view the teams in each cluster:
+
+```{r}
+# Check teams in cluster 1
+cat("Cluster 1 teams:\n")
+off_dat_2$teams[clusters_3 == 1]
+# Check teams in cluster 2
+cat("Cluster 2 teams:\n")
+off_dat_2$teams[clusters_3 == 2]
+
+```
+
+Lets look at the cluster centers and see how they compare:
+
+```{r}
+# Create cluster vector
+cluster <- c(1:2)
+# Join cluster vector and centers
+center_df <- data.frame(cluster, centers_3)
+
+# Reshape the data
+center_reshape <- gather(center_df, features, values, Pass_freq_per_game:Rush_prop_per_game_third_down)
+# View result
+head(center_reshape)
+
+# Create plot
+g_heat_2 <- ggplot(data = center_reshape, # Set dataset
+                   aes(x = features, y = cluster, fill = values)) + # Set aesthetics
+  scale_y_continuous(breaks = seq(1, 2, by = 1)) + # Set y axis breaks
+  geom_tile() + # Set geom tile for heatmap
+  coord_equal() +  # Set coord equal 
+  theme_bw() + # Set theme
+  scale_fill_gradient2(low = "blue", # Choose low color
+                       mid = "white", # Choose mid color
+                       high = "red", # Choose high color
+                       midpoint =0, # Choose mid point
+                       space = "Lab", 
+                       na.value ="grey", # Choose NA value
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  coord_flip() # Rotate plot
+# Generate plot
+g_heat_2
+```
+
+From this we see that cluster 2 has superior performance for both passes and rushes. 
+
+# Sparse Clustering
+
+We can also apply sparse hierarchical clustering to identify features which are useful to include in our clustering model. To do this we need to tune the lambda parameter similar to what we did for the lasso method. We can use the function `KMeansSparseCluster.permute()` to tune the lambda parameter
+
+```{r}
+# Run sparse k-means permute to calculate optimal number of variables
+km.perm <- KMeansSparseCluster.permute(x = off_dat_2[2:20], # Set data
+                                       K=2, # Set cluster number
+                                       nperms=5) # Set number of permutations
+# Print result
+print(km.perm)
+# Visualize result
+plot(km.perm)
+
+```
+
+The guidance is to choose the w values which results in largest gap statistic, the algorithm will try multiple values and return the value which leads to the best gap statistic. However, this leads to all non-zero coefficients, let's instead choose the lowest value within one standard deviation, 3.0151. We can then use this in our clustering algorithm:
+
+```{r}
+# Run sparse K-means with selected value of tuning parameter
+km.sparse <- KMeansSparseCluster(x = off_dat_2[2:20], # Set data
+                                 K=2, # Set cluster number
+                                 wbounds =  3.0151, # Set tuning parameter
+                                 nstart = 25, # Set number of starts
+                                 maxiter=100) # Set number of iterations
+```
+
+We can then extract the cluster and weights for the center values as follows:
+
+```{r Extract cluster and center values}
+clusters_4 <- km.sparse[[1]]$Cs # Extract clusters
+  
+centers_4 <- km.sparse[[1]]$ws # Extract weights
+```
+
+We can then view the center weights as follows:
+
+```{r Center Weights}
+# View weights
+centers_4
+```
+
+Here we see that the key variables for separating the data for this dataset are:
+
+* Pass_freq_per_game
+* Rush_freq_per_game   
+* Rush_avg_epa 
+* Pass_prop_per_game
+* Rush_prop_per_game
+* Pass_prop_per_game_first_down
+* Rush_prop_per_game_first_down
+* Pass_prop_per_game_second_down
+* Rush_prop_per_game_second_down
+* Rush_avg_epa_third_down
+* Pass_prop_per_game_third_down
+* Rush_prop_per_game_third_down
+
+
+
+# Exercises
+
+For this analysis we are going analyse patterns of customer behavior and see if we can find groups that exhibit similar patterns of consumer behavior. We will then analyse the churn rate for each of these subgroups. 
+
+The dataset we are going to be using contains customer level information for a telecoms company with various attributes related to usage collected.
+
+With the rapid development of telecommunication industry, the service providers are inclined more towards expansion of the subscriber base. To meet the need of surviving in the competitive environment, the retention of existing customers has become a huge challenge. It is stated that the cost of acquiring a new customer is far more than that for retaining the existing one. Therefore, it is imperative for the telecom industries to use advanced analytics to understand consumer behavior and in-turn predict the association of the customers as whether or not they will leave the company. 
+
+Let's load the data into the workspace. The data is stored as `telecom_churn.rda`. 
+
+```{r}
+load("telecom_churn.rda")
+```
+
+Let's view the data:
+
+```{r }
+head(telecom_churn) # View first few rows of telecom dataset
+tail(telecom_churn) # View last few rows of telecom dataset
+dim(telecom_churn) # Check dimensions of telecom dataset
+```
+
+We see that we have 3,333 observations for 11 variables in the dataset. The variables we have are:
+
+* Churn - 1 if customer canceled service, 0 if not
+* AccountWeeks - Number of weeks the customer has had an active account
+* ContractRenewal - 1 if customer recently renewed contract, 0 if not
+* DataPlan - 1 if customer has data plan, 0 if not
+* DataUsage - Gigabytes of monthly data usage
+* CustServCalls - Number of calls to customer service
+* DayMins - Average number of day time minutes
+* DayCalls - Average number of daytime calls
+* MonthlyCharge - Average monthly charge
+* OverageFee - Largest overage free in the last 12 months
+* RoamMins - Average number of roaming minutes 
+
+When clustering we will exclude the churn variable and then analyse clusters by their churn rate. 
+
+We can view a summary of this data by running `summary()`:
+
+```{r}
+summary(telecom_churn)
+```
+
+Please complete the following exercises:
+
+* 1 - Scale the dataset (Exclude the churn variable)
+
+* 2 - Choose optimal cluster number for the dataset (May not be clear)
+
+* 3 - Apply K-means clustering with optimal number of clusters
+
+* 4 - View number of samples in each cluster
+
+* 5 - View churn rate for each cluster (Hint: `mean(telecom_churn$Churn[clusters_1 == 1])` )
+
+* 6 - Visualize centers of each cluster
+
+
+* 7 - What are the features of each cluster and which variables are likely related to churn
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

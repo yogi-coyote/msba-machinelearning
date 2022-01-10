@@ -1,0 +1,398 @@
+---
+title: "Hierarchical Clustering Workbook"
+author: "Machine Learning"
+date: "9/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this workbook we will cover an introduction the hierarchical clustering method in R. Hierarchical clustering is a very useful method for identifying groups in a dataset. One of its key strengths is that it does not require us to specify the number of clusters used prior to applying the algorithm. Instead we can view the dendrogram, visualize the structure of the dataset and then choose the number of clusters to use. 
+
+Lets first load the packages we will use for this analysis:
+
+```{r Load Packages}
+# install.packages("cluster")
+# install.packages("factoextra")
+# install.packages("dendextend")
+# install.packages("circlize")
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering visualization
+library(dendextend) # for comparing two dendrograms
+library(circlize) # For circular dendrograms
+```
+The type of hierarchical clustering we will focus on is called agglormerative clustering. Here we start with each sample as its own cluster and work from the bottom up, at each step of the algorithm the two clusters most similar to each other are joined and combined into a new bigger cluster. It is also possible to work from the top down and split the data from one large cluster into smaller clusters and eventually their own cluster.  
+
+### Data
+
+The data we are going to use for this analysis is the `USArrests` data, this dataset contains information on the number of arrests per 100,000 residents in each US state for assault, murder and rape as well as the percentage of the population living in urban areas. This is a built in dataset in R, so to access it we can just run:
+
+```{r Get Data}
+# Assign built in data frame
+data <- USArrests
+```
+
+Lets view the data:
+
+```{r View data}
+head(data)
+tail(data)
+dim(data)
+```
+As we can see the data contains samples for 50 states and has 4 variables. The state is indicated by the rowname of the data. Lets view a summary of the data:
+
+```{r}
+summary(data)
+```
+
+### Hierarchical Clustering
+
+Our objective in this analysis is to identify groups of similar states in the US. For this we will use hierarchical clustering which can be run using the function `hclust()`. Prior to running hierarchical clustering we will need to calculate the distance between the points in our dataset. For clustering it is often beneficial to scale the features prior to analysis so that they have equal weight in the clustering solution.
+
+Lets first scale the data:
+
+```{r}
+# Scale data
+sdata <- scale(data)
+```
+
+We can now view a summary of the data to ensure the scaling has worked correctly:
+```{r}
+# summarize scaled data
+summary(sdata)
+```
+We see now that each of our features has the mean value 0 and if we calculated it, would have a standard deviation of 1. 
+
+Next we need to calculate the distance between the samples in our dataset. We can do this using the `dist()` function. For this analysis we will use Euclidean distance. However if we wished to use other distances we could change the method function. 
+
+```{r}
+# Calculate distances between points
+dist_mat <- dist(sdata, # Set dataset
+                 method = "euclidean") # Set distance measure to use
+
+```
+We can now run our hierarchical clustering algorithm using the calculated distance matrix and the function `hclust`. There are several different linkage methods we can use to tell the algorithm how to deal with joining clusters with multiple samples. For this initial model we will use average linkage, which uses the average distance between all of the points in each cluster as the dissimilarity measure between clusters. 
+
+```{r}
+# Run hierarchical clustering
+hc <- hclust(dist_mat, # Set distance matrix to use 
+              method = "average" ) # Set linkage measure to use
+```
+
+We can then plot the dendrogram produced by this clustering use the `plot()` function:
+
+```{r}
+plot(hc, # Set hierarchical clustering as plot object
+     cex = 0.6, # Set text size
+     hang = -1 ) # Set label position
+```
+From this it appears we likely have 4 main clusters with Alaska being quite distinct from the other samples in our dataset. We can plot the dendrogram to show potential clusters as follows:
+
+```{r}
+plot(hc, # Set hierarchical clustering as plot object
+     cex = 0.6,  # Set text size
+     hang = -1) # Set label position
+# Draw rectangles around branches/clusters
+rect.hclust(hc, # Set hierarchical clustering object
+            k = 5, # Set number of clusters 
+            border = 2:6) # Sets colors for rectangles
+```
+
+We can also plot a nicer looking dendrogram using the dendextend package:
+
+```{r}
+# Create dendrogram
+dend <- as.dendrogram(hc)
+# order it the closest we can to the order of the observations:
+dend <- rotate(dend, 1:50)
+
+# Color the branches based on the clusters:
+dend <- color_branches(dend, k=5) 
+
+# We hang the dendrogram a bit:
+dend <- hang.dendrogram(dend,hang_height=0.1)
+# reduce the size of the labels:
+dend <- set(dend, "labels_cex", 0.55)
+# And plot:
+par(mar = c(3,3,3,7))
+plot(dend, 
+     main = "Clustered State Arrests Data",
+     horiz =  TRUE,  nodePar = list(cex = .007))
+
+```
+We can also plot this in a circular fashion:
+
+```{r}
+par(mar = rep(0,4))
+circlize_dendrogram(dend)
+```
+
+
+
+To extract the clusters from the hierarchical clustering algorithm we can use the `cutree()` function. Here we will extract 5 clusters, however it is also possible to set the parameter `h` which will cut the dendrogram at a certain height. 
+
+```{r}
+clusters <- cutree(hc, # Specify object
+                   k = 5) # Specify number of clusters
+```
+
+It is also possible to visualize the data and clusters in two dimensional space using the `fviz_cluster()`. For this we use the clusters we have extracted:
+
+```{r}
+fviz_cluster(list(data = data, # Set data
+                  cluster = clusters)) # Set clusters
+```
+
+### Other linkage measures
+
+Lets try some other linkage measures and see how they perform for this dataset. Here we will use complete linkage which uses the distance between the two furthest points in the cluster to calculate the distance between them and single linkage which uses the two closest points:
+
+```{r}
+# Run hierarchical clustering
+hc_1 <- hclust(dist_mat, # Set distance matrix to use 
+              method = "complete" ) # Set linkage measure to use
+# Run hierarchical clustering
+hc_2 <- hclust(dist_mat, # Set distance matrix to use 
+              method = "single" ) # Set linkage measure to use
+```
+
+Lets plot the dendrograms for these two trees:
+```{r}
+# Create dendrogram
+dend_1 <- as.dendrogram(hc_1)
+# order it the closest we can to the order of the observations:
+dend_1 <- rotate(dend_1, 1:50)
+
+# Color the branches based on the clusters:
+dend_1 <- color_branches(dend_1, k=5) 
+
+# We hang the dendrogram a bit:
+dend_1 <- hang.dendrogram(dend_1,hang_height=0.1)
+# reduce the size of the labels:
+dend_1 <- set(dend_1, "labels_cex", 0.55)
+# And plot:
+par(mar = c(3,3,3,7))
+plot(dend_1, 
+     main = "Clustered State Arrests Data (Complete Linkage)",
+     horiz =  TRUE,  nodePar = list(cex = .007))
+
+
+# Create dendrogram
+dend_2 <- as.dendrogram(hc_2)
+# order it the closest we can to the order of the observations:
+dend_2 <- rotate(dend_2, 1:50)
+
+# Color the branches based on the clusters:
+dend_2 <- color_branches(dend_2, k=5) 
+
+# We hang the dendrogram a bit:
+dend_2 <- hang.dendrogram(dend_2,hang_height=0.1)
+# reduce the size of the labels:
+dend_2 <- set(dend_2, "labels_cex", 0.55)
+# And plot:
+par(mar = c(3,3,3,7))
+plot(dend_2, 
+     main = "Clustered State Arrests Data (Single Linkage)",
+     horiz =  TRUE,  nodePar = list(cex = .007))
+```
+
+As can be seen from the plots, complete linkage gives a result quite similar to average linkage while single linkage leads to a chaining effect.
+
+
+We can then compare the results given from these two measures using `tanglegram()` which plots two dendrograms side by side:
+
+```{r}
+# Compare average and complete linkage
+tanglegram(dend, dend_1, sort = TRUE)
+```
+
+```{r}
+# Compare average and single linkage
+tanglegram(dend, dend_2, sort = TRUE)
+```
+
+```{r}
+# Compare complete and single linkage
+tanglegram(dend_1, dend_2, sort = TRUE)
+```
+
+## Exercises
+
+For this analysis we will be looking at coffees from different parts of the world. The data is averaged to a country level to give an overall idea of the types of coffee coming from each country. Let's load the data in:
+
+```{r}
+# Load dataset
+load("coffee_data.rda")
+```
+
+Let's view the data:
+
+```{r}
+head(coffee_data) # View first rows of coffe data
+tail(coffee_data) # View tail of coffee data
+summary(coffee_data) # Summarize coffee data
+```
+
+The variables we have are different ratings from coffee tasters encompassing:
+
+* Aroma 
+* Flavor 
+* Aftertaste 
+* Acidity 
+* Body 
+* Balance 
+* Uniformity 
+* Clean.Cup          
+* Sweetness 
+* Cupper.Points 
+* Total.Cup.Points 
+* Moisture             
+* Category.One.Defects 
+
+The countries are stored as the rownames of the dataset:
+
+```{r}
+rownames(coffee_data)
+```
+
+Please attempt the following exercises:
+
+* 1 - Scale the data
+```{r}
+sdata <- scale(coffee_data)
+```
+
+* 2 - Calculate the Euclidean distance between the samples
+```{r}
+dist_mat <- dist(sdata, # Set dataset
+                 method = "euclidean") # Set distance measure to use
+```
+
+* 3 - Cluster the data using average linkage
+```{r}
+hc <- hclust(dist_mat, # Set distance matrix to use 
+              method = "average" ) # Set linkage measure to use
+```
+
+* 4 - Plot the dendrogram of the clustering and decide number of clusters
+```{r}
+plot(hc, # Set hierarchical clustering as plot object
+     cex = 0.6, # Set text size
+     hang = -1 ) # Set label position
+```
+```{r}
+plot(hc, # Set hierarchical clustering as plot object
+     cex = 0.6,  # Set text size
+     hang = -1) # Set label position
+# Draw rectangles around branches/clusters
+rect.hclust(hc, # Set hierarchical clustering object
+            k = 5, # Set number of clusters 
+            border = 2:6) # Sets colors for rectangles
+```
+```{r}
+dend <- as.dendrogram(hc)
+dend <- rotate(dend, 1:35)
+dend <- color_branches(dend, k=5) 
+
+plot(dend, # Set hierarchical clustering as plot object
+     cex = 0.6,  # Set text size
+     hang = -1)
+```
+
+* 5 - Cluster the data using single linkage
+```{r}
+# Run hierarchical clustering
+hc_1 <- hclust(dist_mat, # Set distance matrix to use 
+              method = "single" ) # Set linkage measure to use
+```
+
+
+* 6 -  Plot the single linkage clustering
+```{r}
+plot(hc_1, # Set hierarchical clustering as plot object
+     cex = 0.6,  # Set text size
+     hang = -1) # Set label position
+# Draw rectangles around branches/clusters
+rect.hclust(hc_1, # Set hierarchical clustering object
+            k = 5, # Set number of clusters 
+            border = 2:6) # Sets colors for rectangles
+```
+
+```{r}
+dend_1 <- as.dendrogram(hc_1)
+dend_1 <- rotate(dend_1, 1:35)
+dend_1 <- color_branches(dend_1, k=5) 
+```
+
+
+
+* 7 - Compare the average and single linkage clustering
+
+```{r}
+tanglegram(dend, dend_1, sort = TRUE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

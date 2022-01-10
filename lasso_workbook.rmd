@@ -1,0 +1,415 @@
+---
+title: "Machine Learning - Data Preparation & Feature Selection (Lasso)"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Set Up
+
+
+```{r Load Packages}
+# install.packages("glmnet")
+# install.packages("ggplot2")
+# install.packages("naniar")
+# install.packages("OneR")
+# install.packages("mice")
+# install.packages("plotmo")
+library(glmnet) # Load glmnet for lasso
+library(ggplot2) # Load ggplot2 for visualizations
+library(naniar) # Load nanair for missing data visualization
+library(OneR) # Load OneR for binning function
+library(mice) # Load mice for missing data inputation
+library(plotmo) # for plot_glmnet for lasso visualization
+```
+
+For this analysis we wish to determine which factors play a role in determining the life  expectancy in different countries. For this we have gathered data from different countries, the life expectancy in the country for that year and some public health variables. 
+
+
+```{r Load Data}
+load("life_expectancy.rda")
+```
+
+## Data Preparation
+
+First lets work through some data preparation. As a first step we can view the dataset:
+
+```{r Summary}
+head(life)
+tail(life)
+dim(life)
+```
+
+We have 2938 samples in the data and 22 variables. The variables are:
+
+* `Country` - The country the sample is for
+* `Year` - The year the sample is for
+* `Status` - Developed or Developing status 
+* `Life.expectancy` - Life Expectancy in age
+* `Adult.Mortality` - Adult Mortality Rates of both sexes (probability of dying between 15 and 60 years per 1000 population) 
+* `infant.deaths` - Number of Infant Deaths per 1000 population
+* `Alcohol` - Alcohol, recorded per capita (15+) consumption (in litres of pure alcohol) 
+* `percentage.expenditure` - Expenditure on health as a percentage of Gross Domestic Product per capita(%) 
+* `Hepatitus.B` - Hepatitis B (HepB) immunization coverage among 1-year-olds (%)
+* `Measles` - Number of reported cases per 1000 population 
+* `BMI` - Average Body Mass Index of entire population
+* `under.five.deaths` - Number of under-five deaths per 1000 population 
+* `Polio` - Polio (Pol3) immunization coverage among 1-year-olds (%) 
+* `Total.expenditure` - General government expenditure on health as a percentage of total government expenditure (%)
+* `Diphtheria` - Diphtheria tetanus toxoid and pertussis (DTP3) immunization coverage among 1-year-olds (%)  
+* `HIV.AIDS` - Deaths per 1 000 live births HIV/AIDS (0-4 years) 
+* `GDP` - Gross Domestic Product per capita (in USD) 
+* `Population` - Population of the country 
+* `thinness..1.19.years` - Prevalence of thinness among children and adolescents for Age 10 to 19 (%) 
+* `thinness.5.9.years` - Prevalence of thinness among children for Age 5 to 9(%) 
+* `Income.composition.of.resources` - Human Development Index in terms of income composition of resources (index ranging from 0 to 1) 
+* `Schooling` - Number of years of Schooling(years) 
+
+#### Samples/Instances
+
+For this dataset our samples will be each `Country` and `Year` combination. 
+
+```{r Check number of samples}
+
+nrow(unique(life[, c("Country", "Year")])) # Check number of unique samples
+```
+
+Here the number of unique samples is 2,938, the same as the number of rows in our dataset so we do not have any duplicates present.
+
+#### Response Variable
+
+Our response variable for this analysis will be `Life.expectancy`. Lets generate a summary of our response variable. 
+
+```{r Summary response}
+
+summary(life$Life.expectancy)
+```
+
+This is a continuous variable so this is a regression problem. For our response variable we have 10 missing values, imputing a response variable is not great practice so we will drop those rows:
+```{r Drop missing resp_vars}
+life <- life[!is.na(life$Life.expectancy),] # Drop rows which have missing values for life expectancy
+```
+
+
+
+We can see we have a minimum value of 36.30, a mean value of 69.22, a median value of 72.10 and a max value of 89.00. A median value that is higher than the mean may mean that we have some outliers on the low side of the distribution and vice-versa. Lets look at the distribution using a density plot, `geom_density`.
+
+```{r density Life Expectancy}
+
+g_1 <- ggplot(life, aes(x = Life.expectancy)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+   theme_set(theme_bw(base_size = 22) ) +
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "Life Expectancy (Years)", title = "Distribution of Life Expectancy")
+g_1
+```
+
+As we can see from the plot most of the samples in our database have a life expectancy of approximately 71-74 years. There are some countries with very low life expectancy of 36-40, but the distribution is not massively skewed so we should be okay to use the untransformed variable as our response. 
+
+The resolution of our dataset is on a yearly basis, an example of a lower resolution would be to use the average values for a decade while an example of a higher resolution would be to use monthly values. 
+
+#### Features 
+
+The features we will use for this analysis are: 
+
+* `Adult.Mortality` 
+* `infant.deaths` 
+* `Alcohol`
+* `percentage.expenditure` 
+* `Hepatitus.B` 
+* `Measles` 
+* `BMI` 
+* `under.five.deaths` 
+* `Polio` 
+* `Total.expenditure` 
+* `Diphtheria` 
+* `HIV.AIDS`
+* `GDP` 
+* `Population` 
+* `thinness..1.19.years`
+* `thinness.5.9.years` 
+* `Income.composition.of.resources`
+* `Schooling`
+
+We can generate summary statistics for our features using the `summary()` command:
+```{r Summary Features}
+# Extract feature variables
+feat_vars <- names(life)[5:22]
+# Summarise feature variables
+summary(life[,feat_vars])
+```
+
+From our summary we can see that all of our explanatory variables for this analysis are continuous features. We will not use the `Status`status of a country as an explanatory variable as it is not a particular feature we are interested in however if we view a summary of that variable we can see that it is a discrete/categorical feature:
+
+```{r Summary Status}
+# Summarise developing/not developed status
+summary(as.factor(life$Status))
+```
+
+### Missing Data Imputation
+
+From our summary statistics we can note that there are several missing values for our dataset. To visualizse these we can use the `vis_miss()` command from the `nanair` package. 
+
+```{r Visualise Missing}
+# Visualise missing data
+vis_miss(life[, feat_vars])
+
+```
+
+We see that 4.8% of the data is missing meaning that our data is 4.8% sparse, with 95.2% present indicating it is 95.2% dense. We can visualize the amount missing for each variable for different levels of life expectancy by first binning the data and then producing a heatmap:
+
+```{r Visualise missing by life expectancy}
+t_bins <- bin(life$Life.expectancy, nbins = 6, method = "length") # Bin response variable
+plot_dat <- cbind.data.frame(t_bins, life[, feat_vars])
+gg_miss_fct(x = plot_dat, fct = t_bins) +
+  labs(x = "Life Expectancy")
+```
+
+The main thing that sticks out from this plot is that `Hepatitus.B` is missing at a much higher rate for samples where there is a lower life expectancy. For the other variables it appears that in general we can likely classify the missingness patterns as missing completely at random, while for `Hepatitus.B` the data is likely missing at random. That is we can explain the missingness pattern using the other variables in our dataset. 
+
+We can impute missing values using the `mice` package, for this we will use classification and regression trees to impute the data, `method = "cart"`. This function generates multiple imputed datasets which can then be run through the model and the results analysed each time to determine the effect of the imputation. Here we will just generate a single imputed dataset.
+
+```{r Impute missing}
+imputed_values <- mice( data = life[, feat_vars], # Set dataset
+                        m = 1, # Set number of multiple imputations
+                        maxit = 40, # Set maximum number of iterations
+                        method = "cart", # Set method
+                        print = FALSE) # Set whether to print output or not
+```
+
+We can then replace the missing values in our dataset with the estimates generated by mice imputation. We can do this using the `complete()` function:
+
+```{r Replace Missing}
+life[,feat_vars] <- complete(imputed_values, 1) # Extract imputed data
+```
+
+Now lets summarize our imputed features to see how they look after imputation. 
+
+```{r Summarize Imputed data}
+
+summary(life[, feat_vars]) # Summarize Imputed data
+```
+
+As we can see the missing values in the data have been replaced with imputed values.
+
+
+## Linear Regression
+
+We can now apply a linear regression model to our dataset:
+
+```{r Linear Regression}
+use_dat <- life[, c(4:22)] # Select the columns to use for analysis
+fit_1 <- lm(Life.expectancy ~., # Using ~. uses all other variables as explantory variables
+            data = use_dat)
+# Summarise regression
+summary(fit_1)
+```
+
+From this we see that many of the features are deemed to be significant in the model and we have a pretty high R-squared value. 
+
+## Noise 
+
+What would happen to our results if we added some noise variables to the dataset. Lets create some noise variables first. `rnorm()` generates values from a normal distribution with mean 0 and standard deviation 1. 
+
+```{r Create Nonsense 1}
+set.seed(123456) # Set seed
+nonsense <- as.data.frame(matrix(rep(NA, nrow(use_dat) * 100), nrow = nrow(use_dat), ncol =100)) # Create data frame to store results
+for(i in 1:ncol(nonsense)){
+  nonsense[,i] <- rnorm(n = nrow(use_dat)) # Generate random variables
+}
+```
+
+Now lets join them to our data frame and run the model again:
+```{r Linear Regression 2}
+# Join variables and noise
+use_dat_2 <- cbind.data.frame(use_dat, nonsense)
+# Run linear regression
+fit_2 <- lm(Life.expectancy ~., data = use_dat_2)
+# Summarise regression
+summary(fit_2)
+```
+
+As we see from the output linear regression has found several of the nonsense variables to be significant in the model and the R^2 has increased even though those variables contain only noise. In addition each of these variables will have an impact on our predictions for new data even though they only contain noise, reducing the accuracy of predictions for this model.
+
+
+## The Lasso
+
+As an alternative to linear regression we can use the lasso model.
+
+Prior to applying the lasso we want to scale the data which we use to have standard deviation 1 and mean 0. We can do this with the `scale()` command:
+
+```{r}
+# Drop missing values
+use_dat_2 <- na.omit(use_dat_2)
+# Scale explanatory variables
+x_vars <- scale(use_dat_2[,-1])
+
+```
+
+We fit this model using the `glmnet()` command:
+
+```{r Lasso 1}
+#  Fit lasso model
+fit_3 <- glmnet(x = x_vars, # Fit explanatory variables
+                y = use_dat_2$Life.expectancy, # Fit response variable
+                alpha = 1, # Set alpha as 1 for lasso
+                lambda = 0.5) # Set lambda as 0.5
+
+```
+
+We can then view the calculated coefficients using the `coef()` command:
+
+```{r View lasso 1}
+coef(fit_3) # Print out lasso coefficients
+```
+
+We can see from the print out that the lasso model has calculated the coefficients for each of the noise variables to be zero, indicated by `.`. Thus these variables have no impact on the model and will not affect the predictions which we generate. 
+
+To compare the Lasso and linear regression coefficients we can run:
+
+```{r Lasso Coef v Linear Coef}
+temp <- coef(fit_2) # Extract coefficients from linear model
+temp_2 <- as.vector(coef(fit_3)) # Extract coefficients from lasso model
+cbind.data.frame(temp, temp_2) # Join coefficients together
+
+```
+
+Here we see that the lasso has only selected the coefficients for some of the actual variables in the model to be greater than zero and these coefficients are close to the linear regression estimates.
+
+NOTE: Run laso and run linear regression on remaining variables
+
+
+#### Lasso CV
+In the above example we set our lambda value manually, alternatively we can use the built in cross-validation function to calculate the lambda value to use, though this does not always produce an optimal result.
+
+```{r Lasso CV}
+# Create sequence of lambda values
+lambda_seq <- seq(from = 0.1, to = 10, by = 0.1)
+# Run lasso cross validation
+fit_4 <- cv.glmnet(x = x_vars, # Set explanatory variables
+                   y = use_dat_2$Life.expectancy, # Set response variable
+                   alpha = 1, # Set alpha as 1 for lasso
+                   lambda = lambda_seq, # Set lambda as sequence of lambda values
+                   nfolds = 10) # Set number of folds as 10
+```
+
+
+We can extract the calculated lambda value using:
+
+```{r Lasso extract best lambda}
+best_lam <- fit_4$lambda.1se # Extract best lambda
+best_lam # View best lambda
+```
+
+We can then use the calculated lambda in our lasso model as:
+
+```{r}
+# Fit lasso model
+fit_5 <- glmnet(x = x_vars, # Set x variables
+                y = use_dat_2$Life.expectancy, # Set response variable
+                alpha = 1, # Set alpha as 1 for lasso
+                lambda = best_lam) # Set lambda as best lambda
+# Print out coefficients
+coef(fit_5)
+```
+
+
+We can also run the lasso without selecting a lambda value to use and let the algorithm try multiple values:
+
+```{r}
+# Fit lasso without selecting lambda
+fit_6 <- glmnet(x = x_vars, # Set x variables
+                y = use_dat_2$Life.expectancy, # Set response as life expectancy
+                alpha = 1) # Set alpha as 1 for lasso
+```
+
+
+We can then determine the path of the coefficients over different values of lambda using:
+
+
+```{r View coefficient paths}
+plot_glmnet(fit_6, # Plot lasso coefficients by lambda
+            xvar = "lambda") 
+```
+
+
+## Exercises 
+
+For some exercises we will be analyzing some housing price data:
+```{r}
+# Load house price data
+load("house_price_data.rda")
+```
+
+Lets view the data available:
+
+```{r}
+summary(house_price) # Summarize Housing Price Data
+```
+
+The variables we have available are:
+
+* Location - The country the variables relate to
+* Time - The year the variables relate to
+* House.Price -  The housing prices indicator shows indices of residential property prices over time. The house price is given by the ratio of nominal price to the consumers expenditure  in each country, both seasonally adjusted, from the OECD national accounts database.
+* Education -  The Education is defined as ratio of population having completed the highest level of education (tertiary education)
+* Wages -  Average wages are obtained by dividing the national-accounts-based total wage bill by the average number of employees in the total economy, which is then multiplied by the ratio of the average usual weekly hours per full-time employee to the average usually weekly hours for all employees. This indicator is measured in USD constant prices using 2016 base year and Purchasing Power Parities (PPPs) for private consumption of the same year.
+* Exchange Rates - Exchange rates are defined as the price of one country's' currency in relation to another country's currency. This indicator is measured in terms of national currency per US dollar.
+* GDP - Gross domestic product (GDP) is the standard measure of the value added created through the production of goods and services in a country during a certain period.
+* Health.Spending - Health spending measures the final consumption of health care goods and services including personal health care and collective services, but excluding spending on investments and is measured as a share of GDP, as a share of total health spending and in USD per capita (using economy-wide PPPs).
+* Insurance.Spending - Insurance spending is defined as the ratio of direct gross premiums to GDP, which represents the relative importance of the insurance industry in the domestic economy. This indicator is expressed as a percentage of GDP.
+* Population - Total population of the country in a given year.
+* Tax.on.Property - Tax on property is defined as recurrent and non-recurrent taxes on the use, ownership or transfer of property and is measured in percentage of total taxation.
+* Unemployment.rate - The unemployed are people of working age who are without work, are available for work, and have taken specific steps to find work. This indicator is measured in numbers of unemployed people as a percentage of the labor force and it is seasonally adjusted. 
+
+The objective of our analysis is to be able to identify the factors which determine house price in each of the countries.
+
+Please complete the following exercises:
+
+* Visualize the missing data for the housing price dataset.
+* Impute the missing data values for the housing price dataset.
+* Run a linear regression with housing price as the response variable (Leave out country).
+* Which variables are significant in the linear regression?
+* Run a lasso regression with housing price as the response variable.
+* Which variables have a non-zero coefficient in the lasso regression?
+
+```{r}
+g_h1 <- ggplot(house_price, aes(x = House.Price)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+   theme_set(theme_bw(base_size = 22) ) +
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "House Price", title = "Distribution of House Pricing")
+g_h1
+```
+```{r}
+vis_miss(house_price)
+```
+
+```{r}
+feat_vars <- names(house_price)[c(2, 4:12)]
+
+summary(house_price[,feat_vars])
+```
+```{r}
+imputed_values <- mice( data = house_price[, feat_vars], # Set dataset
+                        m = 1, # Set number of multiple imputations
+                        maxit = 40, # Set maximum number of iterations
+                        method = "cart", # Set method
+                        print = FALSE) # Set whether to print output or not
+
+house_price[,feat_vars] <- complete(imputed_values, 1)
+
+summary(house_price[, feat_vars]) 
+```
+```{r}
+
+```
+

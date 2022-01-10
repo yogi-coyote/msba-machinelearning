@@ -1,0 +1,625 @@
+---
+title: "Linear Regression"
+author: "Mendoza College of Business"
+date: "10/18/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Linear Regression
+
+For this workbook we will be applying linear regression to determine the economic factors underlying global conflict. During this workshop we will:
+
+* Apply simple linear regression
+* Apply multiple linear regression
+* Create interaction terms in linear regression
+* Interpret the output of linear regression
+
+
+## Preliminary Steps
+
+We first need to load our data into the R environment. The data is stored in a file called `insurance_dat.rda`.
+
+```{r load data}
+load("./insurance_dat.rda") # Load Dataset
+```
+
+We also need to load the packages which we are going to use for this analysis into R.
+```{r Load Packages}
+library(ggplot2) # Load ggplot for plotting
+```
+
+
+For this analysis we will be modeling the number of conflicts occurring in a country based on economic factors. Lets first check the dimensions of the data and view the first and last few rows of the data using the, `dim()`, `head()` and `tail()` commands respectively:
+
+```{r View data}
+dim(insurance) # Check dimensions of dataset
+head(insurance) # View head of dataset (First rows)
+tail(insurance) # View tail of dataset (Last rows)
+```
+
+
+We see that we have 1338 samples and eight variables in the dataset which are:
+
+* age - The age of the individual.
+* sex - The sex of the individual.
+* bmi - The body mass index of the individual
+* children - The number of children the individual has
+* smoker - Yes/No if the individual is a smoker
+* region - The region of the country the individual comes from
+* charges - The insurance premium for the individual
+
+
+Let's check that we have no duplicated samples in the dataset:
+
+```{r}
+nrow(unique(insurance)) # Check unique rows in dataset
+```
+
+It looks like there is one duplicated sample in the dataset, we can remove this by running:
+
+```{r}
+# Only select rows which are not duplicated
+insurance <- insurance[!duplicated(insurance),]
+```
+
+We can also examine the dataset using the `summary()` command:
+
+```{r}
+summary(insurance)
+```
+
+## Investigate Response Variable
+
+Next we want to have a look at the response variable we are using:
+
+```{r}
+# Summarize charges column
+summary(insurance$charges)
+```
+
+As this is a numeric variable the `summary()` command returns the minimum, 1st quartile value, median, mean, 3rd quartile value, and the maximum value. From this we can see that the median and mean values fall around 10,000 to 13,000. 
+
+For situations where the mean is greater than the median this may indicate the presence of positive outliers in the dataset. 
+
+
+To get a better idea of how the insurance charges are distributed we can plot a density plot of the charges in the dataset:
+
+```{r}
+# Create plot
+g_1 <- ggplot(insurance, aes(x = charges)) + # Set X-axis as insurance charges
+  geom_density(fill = "blue", alpha = 0.3) + # Use geom_density to get density plot
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(x = "Insurance Charges", # Set plot labels
+       title = "Density plot of Insurance Charges")
+
+g_1 # Generate plot
+```
+
+Here we can see that the majority of the samples pay an insurance charges of less than \$20,000 while some individuals pay extreme charges of greater than \$60,000. 
+
+This is a quite skewed distribution. 
+
+## Log-transform
+
+To provide a more meaningful response variable and reduce the effect of outliers we can transform the data. One way to do this is to use log transform. Log transform reduces the variance of very high values in the dataset and is often useful for dealing with skewed variables. Look what happens when we log transform the values of 1, 10, 100, 1,000, and 10,000. 
+
+```{r Log transform}
+log(1) # Return log 1
+log(10) # Return log 10
+log(100) # Return log 100
+log(1000) # Return log 1000
+log(10000) # Return log 10000
+log(100000) # Return log 100000
+```
+
+
+Here we see that all the variables are now less than 12. Note that as the log transform value of 1 is 0 we will add 1 to each of the values prior to log transforming them:
+
+```{r Log transform conflicts}
+log_charges <- log(insurance$charges + 1) # Log transform insurance charges
+
+summary(log_charges) # Summarize log transformed variable
+
+insurance$log_charges <- log_charges # Add variable to dataset
+```
+
+Here we see that the logged charges now range from 7 to 11.063. Now lets try plotting our transformed variable:
+
+```{r Log conflicts density plot}
+g_2 <- ggplot(insurance, aes(x = log_charges)) + # Set X-axis as the log of insurance charges
+  geom_density(fill = "blue", alpha = 0.3) + # Use geom_density to get density plot
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(x = "Log(Charges + 1)", # Set plot labels
+       title = "Density plot of insurance charges",
+       subtitle = "Log-transformed")
+
+g_2 # Generate plot
+```
+
+This looks a lot closer to normal, not perfect, but an improvement over the previous response. 
+
+
+## First Model
+
+As a first attempt at determining the factors involved in insurance prices let's look at the age of the individual. We hypothesize that higher age leads to a higher price for health insurance given the medical complications that come with old age. First let's create a scatter plot of the log transformed charges vs the age of the individual:
+
+```{r}
+# Create plot
+g_3 <- ggplot(insurance, # Set dataset 
+              aes(y = log_charges, # Set y-axis as insurance charges 
+                  x = age)) + # Set x-axis as age.
+  geom_point(color = "blue", alpha = 0.3) + # Use geom_point to get scatter plot
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(y = "Log(Insurance Charges + 1)", # Set plot labels
+       x = "Age",
+       title = "Insurance Charges v Age")
+
+g_3 # Generate plot
+```
+
+It looks like there is a positive relationship between age and insurance charges, let's add a smoothing line, `geom_smooth()` to identify patterns in the relationship.
+
+```{r}
+# Create plot
+g_4 <- ggplot(insurance, # Set dataset 
+              aes(y = log_charges, # Set y-axis as insurance charges 
+                  x = age)) + # Set x-axis as age.
+  geom_point(color = "blue", alpha = 0.3) + # Use geom_point to get scatter plot
+  geom_smooth(method = "lm") + # Add smoothing line
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(y = "Log(Insurance Charges + 1)", # Set plot labels
+       x = "Age",
+       title = "Insurance Charges v Age")
+
+g_4 # Generate plot
+```
+
+From this it does look like there is quite a significant relationship between the variables with those of higher ages paying a higher premium. 
+
+Lets try fitting a model and see what the results say.
+
+### Fitting a linear regressin model
+
+To fit a linear regression model we use the `lm` command. Inside this function we need to set the formula which is in the form of "response variable ~ explanatory variables", in our case this is `log_charges ~ age`. We also need to specify the dataset which we are using for the model, `insurance`.
+
+```{r Model 1}
+fit_1 <- lm(log_charges ~ age, # Set formula
+            data = insurance) # Set dataset
+```
+
+We can then access the results of our model by running the summary command on the fitted model:
+
+```{r Model 1 summary}
+summary(fit_1)
+```
+
+This prints out quite a bit of information about the model. We are most interested in the estimated coefficients. From this we can see that our intercept value (beta 0) is 7.744703 and the coefficient for inflation (beta 1) is 0.034538. Thus there does seem to be a positive relationship between the age of the individual and the insurance premium they pay. 
+
+We must next ask is this relationship statistically significant. In the column `Pr(>|t|)` the p-values for our coefficients are reported. p-values measure significance in statistics and can be considered as the probability that chance alone produced the relationship. The p-value of the coefficient for inflation is "2e-16" or 0.0000000000000002. Thus it is unlikely that the relationship between age and insurance premium is due to chance.
+
+The final numbers we are interested in from the summary read out are the "Multiple R-squared" and "Adjusted R-squared" values. R-squared is the proportion of the variation in the response variable which is explained by the explanatory variables while adjusted R-squared is a modified version which also accounts for the number of variables in a model. The values for these for our model are 0.2786 and 0.278 respectively. This indicates that approximately 3% of the variation in the insurance premium is explained by our model at present. So, while we have managed to identify a statistically significant relationship between age and insurance premium this model is only explaining about a quarter of the variation in the data and is likely to have poor predictive performance. 
+
+
+# More variables
+
+To try improve our model fit lets add some variables to the model. First lets look at the distributions of the variables and see if we need to transform them, then view their relationship with the insurance premium. 
+
+```{r Summarize variables}
+summary(insurance$sex) # Summarize sex variable
+
+summary(insurance$bmi) # Summarize BMI variable
+
+summary(insurance$children) # Summarize children variable
+
+summary(insurance$smoker) # Summarize smoker variable
+
+summary(insurance$region) # Summarize region variable
+```
+
+Let's first generate scatter plots of the relationship between charges and the numeric variables:
+
+
+```{r}
+# Create plot
+g_5 <- ggplot(insurance, # Set dataset 
+              aes(y = log_charges, # Set y-axis as insurance charges 
+                  x = bmi)) + # Set x-axis as bmi.
+  geom_point(color = "blue", alpha = 0.3) + # Use geom_point to get scatter plot
+  geom_smooth(method = "lm") + # Add smoothing line
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(y = "Log(Insurance Charges + 1)", # Set plot labels
+       x = "BMI",
+       title = "Insurance Charges v BMI")
+
+g_5 # Generate plot
+```
+
+It looks like BMI has a slightly positive relationship with insurance charges. 
+
+Next let's look at the relationship with the number of children:
+
+```{r}
+# Create plot
+g_6 <- ggplot(insurance, # Set dataset 
+              aes(y = log_charges, # Set y-axis as insurance charges 
+                  x = children)) + # Set x-axis as number of children.
+  geom_point(color = "blue", alpha = 0.3) + # Use geom_point to get scatter plot
+  geom_smooth() + # Add smoothing line
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(y = "Log(Insurance Charges + 1)", # Set plot labels
+       x = "Number of Children",
+       title = "Insurance Charges v Children")
+
+g_6 # Generate plot
+```
+
+Since there are only a few levels in the children variable this is not a great view of the data. Instead of a scatter plot let's create a box plot. Here we will wrap children in `factor()` when setting the aesthetic so that ggplot treats it as a categorical variable:
+
+```{r}
+# Create plot
+g_7 <- ggplot(insurance, # Set dataset 
+              aes(y = log_charges, # Set y-axis as insurance charges 
+                  x = factor(children), # Set x-axis as children converted to factor.
+                  color = factor(children))) + # Set color as children converted to factor.
+  geom_boxplot(alpha = 0.7) + # Use geom_boxplot to get  boxplot
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(y = "Log(Insurance Charges + 1)", # Set plot labels
+       x = "Number of Children",
+       title = "Insurance Charges v Children")
+
+g_7 # Generate plot
+```
+
+There does not appear to be much of a relationship here, perhaps a slight increase as the number of children increases above 0. 
+
+
+Note here that we have several categorical variables and so we cannot use scatter plots to visualize the relationship, instead we can use layered density plots. 
+
+Let's first look at the relationship between sex and charges, here we will set `fill` equal to sex and set the fill values manually:
+
+```{r}
+g_8 <- ggplot(insurance, aes(x = log_charges, # Set X-axis as the log of insurance charges
+                             fill = sex)) + # Set fill as sex variable
+  geom_density(alpha = 0.3) + # Use geom_density to get density plot
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_fill_manual(values =  c("female" = "blue", "male" = "red")) +# Set fill values manually
+  labs(x = "Log(Charges + 1)", # Set plot labels
+       title = "Density plot of insurance charges vs Sex",
+       fill = "Sex",
+       subtitle = "Log-transformed")
+
+g_8 # Generate plot
+```
+
+Here we see that there is not much separation between the two distributions, with men having more extreme values of each side. This is not likely to be a significant variable. 
+
+Next up let's visualize the relationship between smoking and insurance charges:
+
+```{r}
+g_9 <- ggplot(insurance, aes(x = log_charges, # Set X-axis as the log of insurance charges
+                             fill = smoker)) + # Set fill as smoker variable
+  geom_density(alpha = 0.3) + # Use geom_density to get density plot
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_fill_manual(values =  c("no" = "blue", "yes" = "red")) + # Set fill values manually
+  labs(x = "Log(Charges + 1)", # Set plot labels
+       title = "Density plot of insurance charges vs Smoker",
+       fill = "Smoker",
+       subtitle = "Log-transformed")
+
+g_9 # Generate plot
+```
+
+Here, we see quite a substantial difference in the charges paid by smokers and non-smokers. This is likely to be a quite significant variable. 
+
+Finally let's visualize the relationship between region and charges:
+
+```{r}
+g_10 <- ggplot(insurance, aes(x = log_charges, # Set X-axis as the log of insurance charges
+                             fill = region)) + # Set fill as region variable
+  geom_density(alpha = 0.3) + # Use geom_density to get density plot
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(x = "Log(Charges + 1)", # Set plot labels
+       title = "Density plot of insurance charges vs Region",
+       fill = "Region",
+       subtitle = "Log-transformed")
+
+g_10 # Generate plot
+```
+
+Here we again see quite similar distributions, though it does look like the south east may pay higher insurance premiums on average. This may be a significant predictor. 
+
+Lets add these variables to our model, and see what the results look like.
+
+### Multiple Linear Regression
+
+To specify a multiple linear regression model we use the same `lm()` function as before, however, now our formula will be `log_charges ~ age + sex + bmi + children + smoker + region`.
+
+```{r Model 2}
+fit_2 <- lm(log_charges ~ age + sex + bmi + children + smoker + region, # Set formula
+            data = insurance) # Set dataset
+```
+
+Now that we have fitted the linear regression model we again use the `summary()` command to examine the model fit.
+
+```{r Examine Model 2}
+summary(fit_2)
+```
+
+Here we see that many of the new variables are significant in our model. With age, bmi, children, and smoker-yes having a positive relationship with the insurance premium. While sex male has a negative relationship. 
+
+You will note that the values sex-female, smoker-no, and the north east region do not appear in the results. This is because the linear regression function converts categorical variables into binaries and leaves out one of the levels. The effect of these variables is then absorbed into the intercept term and other coefficients should be interpreted relative to them. E.g. smokers pay 1.5541456 more logged charges than non-smokers, and those in the northwest, southeast, and southwest regions pay less than those in the northeast region.  
+
+We have significantly increased the proportion of the variation in insurance charges that we are explaining with the multiple R-squared and adjusted R-squared now having values of 0.768 and 0.766 respectively. 
+
+Lets try adding some interaction terms into our model and see if that improves our model fit.
+
+## Interaction terms
+
+Interaction terms are used when we believe that the relationship of one variable and the response variable depends on the value of another variable. 
+
+Let's look again at the relationship between BMI and charges:
+
+```{r}
+# Create plot
+g_11 <- ggplot(insurance, # Set dataset 
+              aes(y = log_charges, # Set y-axis as insurance charges 
+                  x = bmi)) + # Set x-axis as bmi.
+  geom_point(color = "blue", alpha = 0.3) + # Use geom_point to get scatter plot
+  geom_smooth(method = "lm") + # Add smoothing line
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(y = "Log(Insurance Charges + 1)", # Set plot labels
+       x = "BMI",
+       title = "Insurance Charges v BMI")
+
+g_11 # Generate plot
+```
+
+We saw previously that this was not a strong relationship though it does appear to be positive.
+
+However, if we think that the relationship between BMI and Insurance Premium is different depending on if someone smokes or doesn't smoke we could also add that to the plot. Let's see what happens when we color the points on this plot using the smoker variable:
+
+```{r}
+# Create plot
+g_12 <- ggplot(insurance, # Set dataset 
+              aes(y = log_charges, # Set y-axis as insurance charges 
+                  x = bmi, # Set x-axis as bmi.
+                  color = smoker)) + 
+  geom_point(alpha = 0.3) + # Use geom_point to get scatter plot
+  geom_smooth(method = "lm") + # Add smoothing line
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_color_manual(values =  c("no" = "blue", "yes" = "red")) + # Set color values manually
+  labs(y = "Log(Insurance Charges + 1)", # Set plot labels
+       x = "BMI",
+       color = "Smoking Status",
+       title = "Insurance Charges v BMI and Smoker")
+
+g_12 # Generate plot
+```
+
+So here we see that when someone smokes there's a very strong positive relationship between BMI and insurance premium, however if someone doesn't smoke then the relationship between BMI and insurance premium is still positive but much weaker. So here the relationship between BMI and insurance premium is different depending on the smoking variable. Therefore it would be a good idea to include the smoking * BMI interaction term into a model of insurance premiums.
+
+
+
+
+Let's add this term to our model and see if we get any improvement in explanatory power. To do this, we multiply the terms in the formula instead of adding them together, our formula is now: `log_charges ~ age + sex + bmi * smoker + children + region`
+
+
+
+```{r Model 3}
+fit_3 <- lm(log_charges ~ age + sex + bmi * smoker + children + region, # Set formula
+            data = insurance) # Set dataset
+```
+
+Now that we have fitted the linear regression model we again use the `summary()` command to examine the model fit.
+
+```{r Examine Model 3}
+summary(fit_3)
+```
+
+We see now that the multiple R-squared value and the adjusted R-squared value have increased to 0.7835 and 0.7821 respectively. In addition the smoker and BMI coefficients are no longer significant as their effect has been captured in the interaction term which has a significant positive effect. 
+
+## Other interactions
+
+Let's try visualizing some others to see if we find any other good potential variables to use.
+
+First we can look at age and bmi. Here as they are two numeric variables we want to visualize the product of the terms. While we can multiply them inside the formula and it will take care of the multiplication for use to visualize them we can create this term outside by multiplying them together.
+
+```{r}
+# Create copy of data
+plot_dat <- insurance
+
+# Create interaction term
+plot_dat$age_bmi <- insurance$age * insurance$bmi
+```
+
+Now let's visualize this relationship on a scatter plot:
+
+```{r}
+# Create plot
+g_13 <- ggplot(plot_dat, # Set dataset 
+              aes(y = log_charges, # Set y-axis as insurance charges 
+                  x = age_bmi)) + # Set x-axis as bmi and age 
+  geom_point(alpha = 0.3, color = "blue") + # Use geom_point to get scatter plot
+  geom_smooth(method = "lm") + # Add smoothing line
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  labs(y = "Log(Insurance Charges + 1)", # Set plot labels
+       x = "BMI * Age",
+       color = "Smoking Status",
+       title = "Insurance Charges v BMI * Age")
+
+g_13 # Generate plot
+```
+
+It does look like this may be a significant relationship as there is a positive relationship between the interaction term and the response variable.
+
+
+Let's also look at an interaction between smoker and region. For this we can use a box plot to visualize if there are different effects. 
+
+
+```{r}
+g_14 <- ggplot(insurance, aes(y = log_charges, # Set Y-axis as the log of insurance charges
+                              x = region, # Set x-axis as region
+                             fill = smoker)) + # Set fill as smoker
+  geom_boxplot(alpha = 0.3, position = "dodge") + # Use geom_boxplot to get box plot
+  theme_bw() + # Set theme for plot
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+   scale_fill_manual(values =  c("no" = "blue", "yes" = "red")) + # Set fill values manually
+  labs(y = "Log(Charges + 1)", # Set plot labels
+       x = "Region",
+       title = "Density plot of insurance charges vs Region * Smoker",
+       fill = "Smoker",
+       subtitle = "Log-transformed")
+
+g_14 # Generate plot
+```
+
+Here there does not look to be much change in the relationship between charges and smoker by the different regions, so this is unlikely to be a significant variable. 
+
+Let's try adding both of them to the model and seeing what results we get:
+
+```{r}
+fit_4 <- lm(log_charges ~ age + sex + bmi * smoker + children + region + (region * smoker) + (age * bmi), # Set formula
+            data = insurance) # Set dataset
+```
+
+Let's view how the results of the model:
+
+```{r}
+summary(fit_4) # Summarize model 4
+```
+
+Here we see that there has not been much adjustment in the multiple and adjusted R-squared values in our model. Our age\*bmi interaction did not end up being very significant while one of the region\*smoker terms did end up being significant. 
+
+## Higher Order Interactions
+
+We can also create higher level interaction terms by multiplying multiple terms together:
+
+```{r}
+fit_5 <- lm(log_charges ~  sex + children + bmi * smoker * age * region, # Set formula
+            data = insurance) # Set dataset
+```
+
+Let's view how the results of the model:
+
+```{r}
+summary(fit_5) # Summarize model 5
+```
+
+Note that this can rapidly increase the amount of terms that need to included in the model and harm interpretability. Though out multiple R-squared and adjusted R-squared did increase quite a bit to 0.8304 and 0.8261 respectively. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

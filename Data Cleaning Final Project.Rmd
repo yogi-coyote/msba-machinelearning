@@ -1,0 +1,396 @@
+---
+title: 'Final Project: Data Cleaning'
+author: "Alexis Hu, Michael Pascutoi, Vijay Penmetsa, Michael Rziha, Shawn Vetticad"
+date: "12/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#Read In and Summarize Data
+```{r Libraries}
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(fastDummies)
+
+```
+
+```{r Read in the Data}
+imdb_data<-read.csv("./movie_ratings.csv",header=TRUE, na.strings=c("","NA"))
+```
+
+
+```{r Initial Summary and Cleaning}
+#General Data basics
+colnames(imdb_data)
+dim(imdb_data)
+head(imdb_data)
+str(imdb_data)
+
+
+#Remove unncessary characters from numeric data and make 'year' a numeric
+imdb_data$budget = as.numeric(gsub("\\$", "", imdb_data$budget))
+imdb_data$usa_gross_income=as.numeric(gsub("\\$", "", imdb_data$usa_gross_income))
+imdb_data$worlwide_gross_income=as.numeric(gsub("\\$", "", imdb_data$worlwide_gross_income))
+imdb_data$year <- as.numeric(imdb_data$year) 
+
+
+#Production Company had multiple names, which we had to condense
+imdb_data$production_company <- recode(imdb_data$production_company,
+                              "20th Centruy Fox Film Corporation"="Twentieth Century Fox",
+                              "Fox 2000 Pictures" = "Twentieth Century Fox")
+
+
+```
+
+##Creating the Data Set
+```{r}
+#Removed films not made in the US due to issues with currency in dependent variable
+imdb_data <- imdb_data  %>%
+  filter(country=="USA")
+```
+
+
+```{r Preparing The Data for Dummy Separation}
+#Remove films that did not have budget or income information
+imdb_data<-imdb_data[!is.na(imdb_data$budget) & !is.na(imdb_data$usa_gross_income),] 
+
+##Separate cast and crew information into separate columns, and add placeholder columns for production companies
+imdb_data <- imdb_data %>%
+  separate(col=actors,into=c("actor1","actor2","actor3","actor4","actor5"), sep="," ) %>%
+  separate(col=director, into=c("director1","director2"), sep = ",") %>%
+  separate(col=writer, into=c("writer1","writer2","writer3"), sep=",") %>%
+  separate(col=genre, into = c("genre1","genre2","genre3"), sep=",")  %>%
+  add_column(Columbia_production=NA,
+             Universal_production = NA,
+             Fox_production = NA,
+             Paramount_production=NA,
+             Warner_production = NA,
+             Disney_production = NA,
+             Lionsgate_production = NA,
+             MGM_production = NA,
+             Weinstein_production =NA,
+             Pixar_production = NA)
+```
+
+#Production Company Information
+```{r}
+#Create the dummy variables for the production companies
+imdb_data$Columbia_production<-ifelse(grepl("Columbia", imdb_data$production_company), 1, 0)  
+imdb_data$Universal_production<-ifelse(grepl("Universal", imdb_data$production_company), 1, 0)  
+imdb_data$Fox_production<-ifelse(grepl("Century Fox", imdb_data$production_company), 1, 0)  
+imdb_data$Paramount_production<-ifelse(grepl("Paramount", imdb_data$production_company), 1, 0)  
+imdb_data$Warner_production<-ifelse(grepl("Warner Bros", imdb_data$production_company), 1, 0)  
+imdb_data$Disney_production<-ifelse(grepl("Walt Disney P", imdb_data$production_company), 1, 0)  
+imdb_data$Lionsgate_production<-ifelse(grepl("Lionsgate", imdb_data$production_company), 1, 0)  
+imdb_data$MGM_production<-ifelse(grepl("MGM", imdb_data$production_company), 1, 0)  
+imdb_data$Weinstein_production<-ifelse(grepl("Weinstein", imdb_data$production_company), 1, 0)  
+imdb_data$Pixar_production<-ifelse(grepl("Pixar", imdb_data$production_company), 1, 0)  
+ 
+```
+
+
+```{r}
+#Create dependent variable through existing information in data set
+imdb_dataset<- imdb_data  %>% 
+  select(-c("X","imdb_title_id","title","date_published","description")) %>%
+  mutate(domestic_profit = usa_gross_income - (budget*1.5), 
+       worldwide_profit = worlwide_gross_income - (budget*1.5)) %>%
+  mutate(domestic_profitability = domestic_profit/budget,
+         worldwide_profitability = worldwide_profit/budget, 
+         profit = case_when(worldwide_profit > 0 ~ 1,
+                            worldwide_profit <= 0  ~0))
+
+#Add variable for number of langauges in film and dummy variable for presence of language besides English 
+imdb_dataset <- imdb_dataset %>%
+  mutate(language_number = count.fields(textConnection(language), sep = ",")) %>%
+  mutate(language_bool = case_when(language_number > 1 ~ 1,
+                                   language_number == 1 ~ 0))
+
+##Remove NA's from dataset and change variables to factors or numerics for testing
+imdb_dataset[is.na(imdb_dataset)] <- ""  
+imdb_dataset$profit <- as.factor (imdb_dataset$profit)
+imdb_dataset$metascore <-as.integer(imdb_dataset$metascore)
+
+```
+##Load Dummy Variables created from director and actor information
+#Note: These dummy variables were produced with the help of code provided by Professor Martin Barron.  Only minor changes were made to the code, and therefore it is not included because we do not want to claim credit for work that is not our own.
+```{r}
+load("./actor_res.rda")
+load("./director_db.rda")
+```
+
+
+#Create Dummy Variables for film genre
+```{r}
+#Remove excess spaces within the variables
+imdb_dataset$genre1 <- recode(imdb_dataset$genre1,
+                     " Music"="Music",
+                     " Romance"= "Romance",
+                     " Drama"= "Drama",
+                     " Family" = "Family",
+                     " History" = "History",
+                     " Comedy" = "Comedy",
+                     " Mystery" = "Mystery",
+                     " Fantasy" = "Fantasy",
+                     " Crime" = "Crime",
+                     " Film-Noir" = "Film-Noir",
+                     " Musical"= "Musical",
+                     " Thriller" = "Thriller",
+                     " Adventure" = "Adventure",
+                     " War" = "War",
+                     " Western" = "Western",
+                     " Biography" = "Biography",
+                     " Sci-Fi" = "Sci-Fi",
+                     " Music" = "Music",
+                     " Horror" = "Horror",
+                     " Sport" = "Sport",
+                     " Action" = "Action")
+
+imdb_dataset$genre2 <- recode(imdb_dataset$genre2,
+                              " Music"="Music",
+                              " Romance"= "Romance",
+                              " Drama"= "Drama",
+                              " Family" = "Family",
+                              " History" = "History",
+                              " Comedy" = "Comedy",
+                              " Mystery" = "Mystery",
+                              " Fantasy" = "Fantasy",
+                              " Crime" = "Crime",
+                              " Film-Noir" = "Film-Noir",
+                              " Musical"= "Musical",
+                              " Thriller" = "Thriller",
+                              " Adventure" = "Adventure",
+                              " War" = "War",
+                              " Western" = "Western",
+                              " Biography" = "Biography",
+                              " Sci-Fi" = "Sci-Fi",
+                              " Music" = "Music",
+                              " Horror" = "Horror",
+                              " Sport" = "Sport",
+                              " Action" = "Action")
+
+imdb_dataset$genre3 <- recode(imdb_dataset$genre3,
+                              " Music"="Music",
+                              " Romance"= "Romance",
+                              " Drama"= "Drama",
+                              " Family" = "Family",
+                              " History" = "History",
+                              " Comedy" = "Comedy",
+                              " Mystery" = "Mystery",
+                              " Fantasy" = "Fantasy",
+                              " Crime" = "Crime",
+                              " Film-Noir" = "Film-Noir",
+                              " Musical"= "Musical",
+                              " Thriller" = "Thriller",
+                              " Adventure" = "Adventure",
+                              " War" = "War",
+                              " Western" = "Western",
+                              " Biography" = "Biography",
+                              " Sci-Fi" = "Sci-Fi",
+                              " Music" = "Music",
+                              " Horror" = "Horror",
+                              " Sport" = "Sport",
+                              " Action" = "Action")
+
+#create dummy columns for genres, making sure that films with multiple genres can have all listed
+gdum1<-dummy_cols(imdb_dataset$genre1, remove_selected_columns = TRUE)
+gdum2<-dummy_cols(imdb_dataset$genre2, remove_selected_columns = TRUE)
+gdum3<-dummy_cols(imdb_dataset$genre3, remove_selected_columns = TRUE)
+
+#Convert NAs to 0
+gdum2[is.na(gdum2)] <- 0
+gdum3[is.na(gdum3)] <- 0
+
+#Combine dummy variables into one data frame
+gdum_frame <- cbind.data.frame(gdum1, gdum2, gdum3)
+
+#Find all unique genre names
+genres <- unique(c(imdb_dataset$genre1, imdb_dataset$genre2, imdb_dataset$genre3))
+
+#Create database for all genres
+genre_db <- as.data.frame(matrix(NA, nrow=nrow(imdb_dataset), ncol=length(genres)))
+
+#Combine dummy variable frame with genre data frame to create a set data base
+for (i in 1:length(genres)) {
+  col <- paste(".data_", genres[i], sep = "")
+  gdum_frame <- cbind.data.frame(gdum1[,which(names(gdum1) == col)],
+                           gdum2[,which(names(gdum2) == col)],
+                           gdum3[,which(names(gdum3) == col)])
+  genre_db[,i] <- rowSums(gdum_frame)
+  
+}
+#Apply genre names to data frame
+names(genre_db) <- genres
+
+#Summary of information for genre_db
+summary(colSums(genre_db))
+plot(density(colSums(genre_db)))
+
+```
+##Combine all dbs into one data frame
+
+```{r}
+total_data_imdb <- cbind(imdb_dataset, director_db, actor_db, genre_db)
+
+save(total_data_imdb, file="imdb_data_cleaned.rda")
+```
+
+##Reading in data for final formatting
+```{r}
+load("./imdb_data_cleaned.rda")
+```
+
+##Creating list of movies based on Video games from Wikipedia
+```{r}
+library(httr)
+library(XML)
+
+url <- "https://en.wikipedia.org/wiki/List_of_films_based_on_video_games"
+
+r <- GET(url)
+
+doc <- readHTMLTable(doc=content(r, "text"))
+vg_movies <- c(doc[[1]][2:43,'V1'], doc[[2]][2:5,'V1'])
+```
+
+##Adding a new binary column for video game movies
+```{r cleaning and adding is_vg}
+#names(total_data_imdb) <- gsub(" ", "_", names(total_data_imdb))
+#names(total_data_imdb) <- gsub("^_", "", names(total_data_imdb))
+for(title in total_data_imdb){
+  total_data_imdb$is_vg <- ifelse(total_data_imdb$original_title %in% vg_movies, 1, 0)
+}
+```
+
+
+##Removing duplicate columns and varibales that are not independent from the predictor.
+```{r filetering out columns}
+dup_names <- !duplicated(names(total_data_imdb))
+summary(dup_names)
+total_data_imdb2 <- total_data_imdb[,dup_names]
+summary(duplicated(names(total_data_imdb2)))
+
+dtypes <- sapply(total_data_imdb2, class)
+numeric_index <- dtypes %in% c('numeric', 'integer', 'factor')
+
+total_data_num <- total_data_imdb2[,numeric_index]
+
+
+rm_cols <- c("original_title",
+              "year",
+              "genre1",
+              "genre2",
+              "genre3",
+              "country",
+              "language",
+              "director1",
+              "director2",
+              "writer1",
+              "writer2",
+              "writer3",
+              "production_company",
+              "director", 
+              "actor",
+              "actor1",
+              "actor2",
+              "actor3",
+              "actor4",
+              "actor5",
+              "avg_vote",
+              "votes",
+              "usa_gross_income",
+              "worlwide_gross_income",
+              "metascore",
+              "reviews_from_users",
+              "reviews_from_critics",
+              "weighted_average_vote",
+              "total_votes",
+              "mean_vote",
+              "median_vote",
+              "votes_10",
+              "votes_9",
+              "votes_8",
+              "votes_7",
+              "votes_6",
+              "votes_5",
+              "votes_4",
+              "votes_3",
+              "votes_2",
+              "votes_1",
+              "allgenders_0age_avg_vote",
+              "allgenders_0age_votes",
+              "allgenders_18age_avg_vote",
+              "allgenders_18age_votes",
+              "allgenders_30age_avg_vote",
+              "allgenders_30age_votes",
+              "allgenders_45age_avg_vote",
+              "allgenders_45age_votes",
+              "males_allages_avg_vote",
+              "males_allages_votes",
+              "males_0age_avg_vote",
+              "males_0age_votes",
+              "males_18age_avg_vote",
+              "males_18age_votes",
+              "males_30age_avg_vote",
+              "males_30age_votes",
+              "males_45age_avg_vote",
+              "males_45age_votes",
+              "females_allages_avg_vote",
+              "females_allages_votes",
+              "females_0age_avg_vote",
+              "females_0age_votes",
+              "females_18age_avg_vote",
+              "females_18age_votes",
+              "females_30age_avg_vote",
+              "females_30age_votes",
+              "females_45age_avg_vote",
+              "females_45age_votes",
+              "top1000_voters_rating",
+              "top1000_voters_votes",
+              "us_voters_rating",
+              "us_voters_votes",
+              "non_us_voters_rating",
+              "non_us_voters_votes",
+              "domestic_profit",
+              "worldwide_profit",
+              "domestic_profitability",
+              "worldwide_profitability",
+              "Var.11971"  
+             )
+
+
+#Removing problematic columns
+total_data_num <- total_data_num[, which(!names(total_data_num) %in% rm_cols)]
+
+#dim(total_data_imdb)
+#dim(total_data_num)
+```
+
+##Filtering out the varibales that have low number of occurences.
+```{r}
+col_weights <- colSums(Filter(is.numeric, total_data_num))
+
+narrow_cols <- c(names(col_weights[col_weights >= 7]),
+                 "is_vg",
+                 
+                 "Ruben_Fleischer_director",
+                 "Tom_Holland_actor",
+                 #"Mark_Wahlberg_actor",
+                 #"Antonio_Banderas_actor",
+                 
+                 "profit"
+                 )
+
+total_data <- total_data_num[,narrow_cols]
+#dim(total_data)
+```
+
+##Saving final formatted file for model training
+```{r}
+save(total_data, file = 'total_data.rda')
+```

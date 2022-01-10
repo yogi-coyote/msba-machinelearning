@@ -1,0 +1,195 @@
+---
+title: "Assignment 2 - Logistic Regression"
+author: "ITAO 40420 - Machine Learning"
+date: "29 January 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2) # load ggplot
+library(reshape) # load reshape 2
+library(glmnet) # Load glmnet
+library(plotmo) # for plot_glmnet
+```
+
+
+# Assignment 2
+
+For this analysis we will be using churn data. The dataset is stored as `churn_data.rda` which can be loaded in by running the below command if the file is located in your working directory or else by accessing the file through file->open file
+
+```{r Load Data 2}
+load("churn_data.rda") # Load churn dataset
+```
+
+We can view a summary of this dataset by running `summary()`:
+
+```{r}
+summary(churn_data)
+```
+
+The variables we have are:
+
+* Gender - Whether the customer is a male or a female
+* SeniorCitizen - Whether the customer is a senior citizen or not (1,0)
+* Partner - Whether the customer has a partner or nor (Yes, No)
+* Dependents - Whether the customer has dependents or not (Yes, No)
+* tenure - Number of months the customer has stayed with the company
+* PhoneService - Whether the customer has a phone service of no (Yes, No)
+* MultipleLines - Whether the customer has multiple lines or not (Yes, No, No phone service)
+* InternetService - Customer's internet service provider (DSL, Fiber optic, No)
+* OnlineSecurity - Whether the customer has online security or not (Yes, No, No internet service)
+* OnlineBackup - Whether the customer has online backup or not (Yes, No, No internet service)
+* DeviceProtection - Whether the customer has tech support or not (Yes, No, No internet service)
+* StreamingTV - Whether the customer has streaming TV or not (Yes, No, No internet service)
+* StreamingMovies - Whether the customer has streaming movies or not (Yes, No, No internet service)
+* Contract - The contract term of the customer (Month-to-month, One year, Two year)
+* PaperlessBilling - Whether the customer has paperless billing or not (Yes, No)
+* PaymentMethod - The customer's payment method (Electronic CHECK, Mailed check, Bank transfer (automatic), Credit card (automatic))
+* MonthlyCharges - The amount charged to the customer monthly
+* TotalCharges - The total amount charged to the customer
+* Churn - Whether the customer churned or not (1 = Yes or 0 = No)
+
+
+The response variable for this dataset is `Churn`:
+
+```{r}
+summary(as.factor(churn_data$Churn))
+```
+```{r}
+plot_data <- churn_data 
+plot_data$Churn <- as.factor(plot_data$Churn)
+```
+
+
+For the assignment please carry out the following tasks/answer the following questions: (12 Points)
+
+
+* 1 - Create at least two visualizations potentially revealing factors with predictive power (2 Points)
+
+```{r}
+g_1 <- ggplot(plot_data, aes(x = TotalCharges, fill = Churn)) + 
+  geom_density(alpha = 0.5) + # Select density plot and set transperancy (alpha)
+    theme_set(theme_bw(base_size = 22) ) + # Set theme and text size
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank())
+g_1
+```
+```{r}
+g_2 <- ggplot(plot_data, aes(x = tenure, fill = Churn)) + # Set x as mean radius and fill as diagnosis
+  geom_density(alpha = 0.5) + # Select density plot and set transperancy (alpha)
+    theme_set(theme_bw(base_size = 22) ) + # Set theme and text size
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank())
+g_2
+```
+
+```{r}
+g_3 <- ggplot(plot_data, aes(x = PaperlessBilling, fill = Churn)) + 
+  geom_density(alpha = 0.5) + # Select density plot and set transperancy (alpha)
+    theme_set(theme_bw(base_size = 22) ) + # Set theme and text size
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank())
+g_3
+```
+
+* 2 - Fit a logistic regression model to the data. (Remember you can use `resp ~.,` to include all explanatory variables in the model) (2 Points)
+
+
+```{r}
+fit_full <- glm(Churn ~ .,
+             family=binomial(link='logit'),
+             data= churn_data)
+summary(fit_full)
+```
+
+```{r}
+fit_model <- glm(Churn ~ 
+               SeniorCitizen 
+             + tenure 
+             + Contract 
+             + PaperlessBilling 
+             + PaymentMethod
+             + MonthlyCharges
+             + TotalCharges, 
+            family = binomial(link='logit'),
+             data= churn_data)
+summary(fit_model)
+```
+
+* 3 - What features are significant in your logistic regression model? (1 Point)
+
+Significant predictors =  
+SeniorCitizen, tenure, ContractOne year, ContractTwo year, PaperlessBillingYes, PaymentMethodElectronic check , MonthlyCharges, TotalCharges
+
+* 4 - What is the AIC of your logistic regression model?  (1 Point)
+
+full model AIC = 5874.3
+reduced variable AIC: 6020
+
+* 5 - Add an interaction term to the logistic regression model? (1 Point)
+
+```{r}
+fit_model <- glm(Churn ~ .
+             + (tenure * MonthlyCharges), 
+            family = binomial(link='logit'),
+             data= churn_data)
+summary(fit_model)
+```
+
+* 6 - Does the addition of the interaction term increase or decrease the AIC? What is the new AIC for the model? (1 Point)  
+  
+Addition of interaction term has increased the AIC.  
+AIC went up from 5874.3 to 5876.3.  
+
+
+* 7 - Fit a lasso logistic regression model to the data. (1 Point)
+
+```{r}
+library(glmnet)
+names(churn_data)
+x_vars <- model.matrix(Churn ~., 
+                       churn_data)[,-1]
+
+x_data <- as.data.frame(scale(x_vars)) # Scale dataset
+
+lasso_fit <- glmnet(x = x_data, # Set explantory variables
+                    y = churn_data$Churn, # Set response variable
+                    alpha = 1, # Set alpha value
+                    family = "binomial")
+
+plot_glmnet(lasso_fit, # Plot lasso coefficients by lambda
+            xvar = "lambda")
+
+```
+
+* 8 - Which coefficients were non-zero in the lasso model? Were they positive or negative? What does this imply? (1 Point)
+
+```{r}
+lasso_fit_1 <- glmnet(x = x_data, # Set explantory variables
+                    y = churn_data$Churn, # Set response variable
+                    alpha = 1, # Set alpha value
+                    family = "binomial",
+                    lambda = 0.05) #Set lambda to 0.05 to get set values of coefficients
+
+coef(lasso_fit_1)
+```
+
+There are a total of 11 non-zero coefficients. 8 of the coefficients are negative and 3 are positive. This implies that higher values for the positive variables and lower values for the negative negative, both lead to higher churn probability. 
+
+
+2 Points for analysis decisions and code quality.
+
+Please submit an an R-markdown document with the answers, optionally you can submit an R-script with the code used for your analysis and a document answering the specific questions, you can use word, pdf etc.
+
+Assignments can be submitted via Canvas or by email to mbarron2@nd.edu. 
+

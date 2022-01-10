@@ -1,0 +1,538 @@
+---
+title: "Decision Tree Workbook"
+author: "Machine Learning"
+date: "30 August 2021"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+In this lab we are going to look at mental health in tech companies. The dataset we are going to use is from 2014 survey of attitudes towards mental health in tech companies. The objective for this analysis will be to identify the factors that lead towards an individual seeking help for a mental health condition. 
+
+# Set Up
+
+### Load Packages 
+First lets load the packages we are going to use for this analysis.
+
+```{r Load Packages ,message=FALSE}
+#install.packages("ggplot2")
+#install.packages("rpart")				        # Popular decision tree algorithm
+#install.packages("rattle")					# Fancy tree plot
+#install.packages("rpart.plot")				# Enhanced tree plots
+#install.packages("RColorBrewer")				# Color selection for fancy tree plot
+#install.packages("party")					# Alternative decision tree algorithm
+#install.packages("partykit")				# Convert rpart object to BinaryTree
+#install.packages("caret2")		
+#install.packages("splitstackshape")
+
+library(ggplot2)
+library(rpart)				        # Popular decision tree algorithm
+library(rattle)					# Fancy tree plot
+library(rpart.plot)				# Enhanced tree plots
+library(RColorBrewer)				# Color selection for fancy tree plot
+library(party)					# Alternative decision tree algorithm
+library(partykit)				# Convert rpart object to BinaryTree
+library(caret)	
+library(reshape2) # Load reshape 2 for melting
+library(DMwR) # Load data mining with R for SMOTE
+library(splitstackshape) # Used for stratified sampling
+```
+
+### Load data
+
+The data for this analysis is stored as `mh_dat.rda`. To load it in we run the `load()` command.
+```{r Load Data}
+load("mh_dat.rda") # Load data into workspace
+```
+
+
+
+### View Data
+
+We will again run the usual commands for viewing the start, end, and dimension of the dataset.
+
+```{r View Data 1}
+head(mh_dat) # View first five rows
+tail(mh_dat) # View last five rows
+dim(mh_dat) # View dimensions of data
+```
+
+From  this we see that we have  20 variables are 999 observations. The variables we have for this analysis are:
+  
+  * age - The age of the survey respondent
+* self_employed - Response to "Are you self employed?"
+* family_history - Response to "Do you have a family history of mental illness"
+* remote_work - Response to "Do you work remotely (outside of an office) at least 50% of the time?""
+* tech_company -  Response to "Is your employer primarily a tech company/organization?"
+* benefits - Response to "Does your employer provide mental health benefits?"
+* care_options - Response to "Do you know the options for mental health care your employer provides?"
+* wellness_program - Response to "Has your employer ever discussed mental health as part of an employee wellness program?"
+* anonymity - Response to "Is your anonymity protected if you choose to take advantage of mental health or substance abuse treatment resources?"
+* leave - Response to "How easy is it for you to take medical leave for a mental health condition?"
+* mentalhealthconsequence - Response to "Do you think that discussing a mental health issue with your employer would have negative consequences?"
+* physhealthconsequence - Response to "Do you think that discussing a physical health issue with your employer would have negative consequences?"
+* coworkers - Response to "Would you be willing to discuss a mental health issue with your coworkers?"
+* supervisor - Response to "Would you be willing to discuss a mental health issue with your direct supervisor(s)?"
+* mentalhealthinterview - Response to "Would you bring up a mental health issue with a potential employer in an interview?"
+* physhealthinterview - Response to "Would you bring up a physical health issue with a potential employer in an interview?"
+* mentalvsphysical - Response to "Do you feel that your employer takes mental health as seriously as physical health?""
+* obs_consequence - Response to "Have you heard of or observed negative consequences for coworkers with mental health conditions in your workplace?"
+* no_employees_mid - Mid-interval value of response to "How many employees does your company or organization have?"
+
+We can then run the `summary()` command on the data to get a summary of the variables we have:
+  
+```{r View data 2}
+summary(mh_dat) # Summarise data
+```
+
+Note that there are some strange values for the age variable, with the youngest respondent being 5 years old, which is a strange age to be working in a tech firm. 
+
+The `resp_var` variable contains the response we will use for this analysis. We have 362 individuals who have not sought help and 637 who have previously sough help. 
+
+Let's create some visualizations to see if we can identify any relationships between our response variable and our explanatory variables.
+
+```{r Response Plots}
+g_1 <- ggplot(mh_dat, aes(x = Age, fill = resp_var)) + # Set x and y aesthetics
+    geom_density(alpha = 0.3) + # Set geom density for density plot
+    theme_bw() + # Set theme bw
+    theme(panel.grid.major = element_blank(), # Turn of the background grid
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank()) +
+    labs(x = "Age",  # Set plot labels
+    fill = "Sought Help",
+    title = "Age v Sought Help") +
+    scale_fill_manual(values = c("no_help" = "red", "sought_help" = "blue"), # Manually set fill values
+    labels = c("no_help" = "No Help", "sought_help" = "Sought Help"))
+# Generate plot
+g_1
+```
+There does not appear to be a strong relationship between age and seeking help. As many of our variables for this analysis are categorical, which can be challenging to visualize, what we will do is calculate the proportion of individuals who did not seek help for the response and then plot a heat map
+
+```{r heatmap_prep}
+# Select variables to use
+vars <- c("self_employed", "family_history", "remote_work", "tech_company", "benefits", "care_options",
+"wellness_program", "anonymity", "obs_consequence")
+# Create vector of responses
+resps <- c("Yes", "No", "Don't know")
+# Create empty data frame to store proportion
+res_mat <- as.data.frame(matrix(NA, nrow = length(vars), ncol = length(resps)))
+# Loop through and calculate proportion for each question and response
+for(i in 1:nrow(res_mat)){
+    # Proportion of no help for yes
+    res_mat[i,1] <- (sum(mh_dat$resp_var == "no_help" &
+    mh_dat[,vars[i]] == "Yes", na.rm = TRUE)/sum(!is.na(mh_dat[mh_dat[,vars[i]] == "Yes",vars[i]])))
+    # Proportion of no help for no  
+    res_mat[i,2] <- (sum(mh_dat$resp_var == "no_help" &
+    mh_dat[,vars[i]] == "No", na.rm = TRUE)/sum(!is.na(mh_dat[mh_dat[,vars[i]] == "No",vars[i]])))
+    # Proportion of no help for don't know/not sure
+    res_mat[i,3] <- (sum(mh_dat$resp_var == "no_help" &
+    mh_dat[,vars[i]] %in% c("Don't know", "Not sure"), na.rm = TRUE)/
+    sum(!is.na(mh_dat[mh_dat[,vars[i]] %in% c("Don't know", "Not sure"),vars[i]])))
+
+}
+
+# Add column names
+names(res_mat) <- resps
+# Join with variable vector
+plot_dat <- cbind.data.frame(vars, res_mat)
+# Melt data (Convert to long form)
+m_dat <- melt(plot_dat, id.vars = "vars")
+# View melted data
+m_dat
+# Calculate overall proportion of no help answers
+prop_no <- sum(mh_dat$resp_var == "no_help")/sum(!is.na(mh_dat$care_options))
+#print proportion of no help in data
+prop_no
+```
+
+We can then use the melted data to create a heat map. For this we can use `geom_tile()`. We will also scale the color to the proportion of respondents who did not seek help for each question. The proportion of the samples in the data who did not seek help is `0.3623624`. We can use `scale_fill_gradient2()` to control the colors of our heat map. For this we will set the midpoint at `0.3623624` and have values higher than that colored red and values below colored blue. Thus items with red squares are where their is a higher than expected proportion of individuals did not seek help.
+
+```{r Create Heatmap}
+
+g_2 <- ggplot(m_dat, aes(y = vars, x = variable, fill = value)) + # set aesthetics
+    geom_tile() + # Use geom_tile for heatmap
+    theme_bw() + # Set theme
+    scale_fill_gradient2(low = "blue", # Choose low color
+    mid = "white", # Choose mid color
+    high = "red", # Choose high color
+    midpoint = prop_no, # Choose mid point
+    space = "Lab", 
+    na.value ="grey", # Choose NA value
+    guide = "colourbar", # Set color bar
+    aesthetics = "fill") + # Select aesthetics to apply
+    labs(x = "Response", y = "Question", fill = "Proportion - No Help") # Set labels
+g_2 # Generate plot
+
+```
+
+From the heat map it would appear that those who do not have a family history of mental health challenges are less likely to seek help, in addition those who do not have care options or are unaware of the care options or benefits are less likely to seek help. 
+
+# Decision Trees
+
+We are now ready to fit a classification tree in order to predict if an individual will seek or not seek help for a mental health issue. To build a decision we will use the `rpart()` function. We will build our first tree using all the variables, using `~.` as we did for logistic and linear regression. 
+```{r Decision tree 1}
+tree_1 <- rpart(resp_var ~., # Set tree formula
+data = mh_dat) # Set dataset
+par(xpd = NA) # Set this avoid cut-off text
+plot(tree_1)  # Plot tree
+text(tree_1, digits = 3) # Add text
+```
+
+The default plot for decision trees in R is terrible. To remedy this we can use `fancyRpartPlot()`.
+
+```{r Plot tree 1}
+fancyRpartPlot(tree_1) # Plot fancy tree
+```
+
+Here we can see that the top splitting variable is family history as we might expect from the heat map we created. The double negative at the first split can be confusing but what it is showing is that samples who did not have "family_history = No" are more likely to seek help and end up in the terminal node on the right while samples who did have a family history are split to the left. 
+
+We can also the view the tree structure by calling the fitted tree:
+```{r Call tree}
+tree_1
+```
+
+If we run the `summary()` command on the tree this prints out a wealth of information regarding the tree. 
+```{r Summary tree 1}
+summary(tree_1)
+```
+
+The initial table has some valuable information:
+
+* CP - Complexity parameter divided by the misclassification rate from the root node. The default stopping value for cp is 0.01
+* nsplit -  Number of terminal nodes at each level of the complexity parameter.
+* rel_error - Relative error or misclassification for the tree at that point. To get absolute error multiply by the error in the root node. 
+* xerror/xstd - Refer to results of a cross-validation procedure. Ideally we want to select the tree with the lowest xerror +/- 1 standard deviation. 
+
+The second table down provides the variable importance calculated for each of the variables in the tree. 
+
+Most of the rest of the output is rather challenging to interpret however you will notice that for some nodes we see the term surrogate splits mentioned. This refers to how trees deal with missing data. When a sample has a missing value for a splitter, what decision trees do is look for a variable which splits the samples in a similar fashion to the splitting variable and uses that to split samples for which the original splitting variable is missing. 
+
+### Selecting CP
+
+In fitting a basic tree we are most interested in the complexity parameter. To view the complexity parameter table from the summary statistics by itself we can run `printcp()`:
+
+```{r Print CP}
+printcp(tree_1) # Print complexity parameter table
+```
+
+A better way to interpret the complexity parameter is to plots its progression and compare different values with the relative error they lead to:
+
+```{r plot cp}
+plotcp(tree_1) # Plot cp
+```
+
+Ultimately the complexity parameter is used to control the size of the tree. Smaller values will build larger trees (with cp =0 building a maximal tree) and larger values dictating that a larger reduction in error must be achieved before growing the tree. We want to find a model which minimizes the cross-validation relative error. To do this we must adjust some parameters in our rpart model. From the graph we can see that the lowest relative error occurs when cp = 0.022. To set this parameter in our model we can use `control = rpart.control()` inside the rpart function:
+
+```{r tree set cp}
+tree_2 <- rpart(resp_var ~., # Set tree formula
+data = mh_dat, # Set data
+control = rpart.control(cp = 0.022)) # Set parameters
+fancyRpartPlot(tree_2) # Plot fancy tree
+```
+
+We can also set some other parameters inside `rpart.control()`:
+
+* minsplit -	the minimum number of observations that must exist in a node in order for a split to be attempted.
+* minbucket	- the minimum number of observations in any terminal node.
+* xval - number of cross-validations.
+* maxdepth -	Set the maximum depth of any node of the final tree, with the root node counted as depth 0. Values greater than 30 rpart will give nonsense results on 32-bit machines.
+
+
+## Imbalanced Data
+
+For this dataset we have a slightly imbalanced dataset. There are 637 samples who sought help and 362 individuals who did not seek help. This may have an effect on our classifier paying more attention to the majority class. To remedy this we can use:
+
+* Bootstrap re-sampling - Sample with replacement from the minority class to re-balance the data
+* SMOTE - Synthetic minority over-sampling technique, this creates new synthetic samples for the minority class. 
+
+### Bootstrap resampling
+
+To carry out bootstrap re-sampling we simply generate a random selection of indices from the minority class to use in the model, in effect this randomly duplicates some of the minority class samples:
+
+```{r bootstrap resample}
+# Split data into help and no help classes
+no_help <- mh_dat[which(mh_dat$resp_var == "no_help"),] # Select minority samples
+help <- mh_dat[which(mh_dat$resp_var == "sought_help"),] # Select majority samples
+nrow(no_help) # Rows in no help
+nrow(help) # Rows in help
+set.seed(123456) # Set seed for sampling
+no_help_boot <- no_help[sample(1:nrow(no_help), size = nrow(help), replace =TRUE),] # Create bootstrap sample
+nrow(no_help_boot) # Check rows of bootstrap sample
+use_dat <- rbind.data.frame(help, no_help_boot) # Join data together
+```
+
+We can now fit a tree on the bootstrapped data:
+```{r tree boot}
+tree_3 <- rpart(resp_var ~., # Set tree formula
+data = use_dat) # Set data
+fancyRpartPlot(tree_3) # Plot fancy tree
+```
+
+As can be seen in the graph the root node now contains an even number of both the minority and majority classes. 
+
+### SMOTE
+
+SMOTE creates new synthetic observations using the observations already present in this class using the nearest neighbors of the samples. It is also possible to under-sample with SMOTE.
+
+![Multi-Class Data](SMOTE_R_visualisation_1.png)
+
+
+![Link data](SMOTE_R_visualisation_2.png)
+
+
+
+![Creat new samples](SMOTE_R_visualisation_3.png)
+
+
+
+We can run SMOTE using `SMOTE()`. The amount of samples to generate for the minority class is set using `perc.over`. Here we will set this parameter to 100 to have equal class representation in the dataset.
+```{r smote}
+smote_dat <- SMOTE(resp_var ~ ., # Set prediction formula
+mh_dat, # Set dataset
+perc.over = 100) # Select oversampling for minority class
+summary(smote_dat$resp_var)
+```
+
+We can now build a tree on the SMOTE dataset:
+
+```{r smote tree}
+tree_4 <- rpart(resp_var ~., # Set tree formula
+data = smote_dat) # Set data
+fancyRpartPlot(tree_4) # Plot fancy tree
+```
+
+
+## Prediction prelim
+
+To test how our model will perform on new data we can split the data into training and test sets. We will use the data which is already split into help and no help to ensure we have an equal proportion of samples in each class for both our training and test sets. We will use 20% of the data for testing. To do this we can use the stratified function which will create a stratified sample for our dataset.
+
+```{r train test}
+ set.seed(123456) # Set seed
+# Perform stratified sampling
+ split_dat <- stratified(mh_dat, # Set dataset
+                         group = "resp_var", # Set variables to use for stratification
+                         size = 0.2,  # Set size of test set
+                         bothSets = TRUE ) # Return both training and test sets
+ # Extract train data
+ train_dat <- split_dat[[2]]
+ # Extract test data
+ test_dat <- split_dat[[1]]
+
+# Check size
+nrow(train_dat)
+nrow(test_dat)
+```
+
+So we have 800 training samples and 199 test samples. We can now build a tree on the training data:
+
+```{r build train tree}
+tree_5 <- rpart(resp_var ~., # Set tree formula
+data = train_dat) # Set data
+fancyRpartPlot(tree_5) # Plot fancy tree
+```
+
+We can then predict the class of the test samples:
+
+```{r Predict new}
+preds <- predict(tree_5, test_dat) # Predict test samples
+```
+
+We can the visualize the results of our prediction by class:
+
+
+```{r plot predictions}
+# Join predictions (second column is prob of sought help) and test response
+plot_dat <- cbind.data.frame(preds[,2], test_dat$resp_var)
+names(plot_dat) <- c("probability", "response")
+g_3 <- ggplot(plot_dat, aes(y = probability, x = response, fill = response)) +
+geom_boxplot() +
+theme_bw() +
+theme(panel.grid.major = element_blank(), # Turn of the background grid
+panel.grid.minor = element_blank(),
+panel.border = element_blank(),
+panel.background = element_blank()) +
+labs(y = "Probability",  # Set plot labels
+fill = "Sought Help",
+title = "Predicted Probabilities v Sought Help") +
+scale_fill_manual(values = c("no_help" = "red", "sought_help" = "blue"), # Manually set fill values
+labels = c("no_help" = "No Help", "sought_help" = "Sought Help"))
+g_3
+
+
+g_4 <- ggplot(plot_dat, aes(x = probability, fill = response)) +
+geom_density(alpha = 0.3) +
+theme_bw() +
+theme(panel.grid.major = element_blank(), # Turn of the background grid
+panel.grid.minor = element_blank(),
+panel.border = element_blank(),
+panel.background = element_blank()) +
+labs(x = "Probability",  # Set plot labels
+fill = "Sought Help",
+title = "Predicted Probabilities v Sought Help") +
+scale_fill_manual(values = c("no_help" = "red", "sought_help" = "blue"), # Manually set fill values
+labels = c("no_help" = "No Help", "sought_help" = "Sought Help"))
+g_4
+```
+
+Lets use a cut-off of 0.6 and see what the results would look like in a confusion matrix:
+
+```{r confusion matrix}
+preds_char <- rep("no_help", nrow(plot_dat)) # Create vector for predictions with deafult value
+preds_char[which(plot_dat$probability >= 0.6)] <- "sought_help" # Select sought help predictions
+confusionMatrix(table(preds_char, plot_dat$response)) # Create confusion matrix
+```
+
+Lets see if using smote on the training data can help improve our accuracy;
+
+```{r smote preds}
+# Run smote
+smote_dat_2 <- SMOTE(resp_var ~ ., # Set prediction formula
+train_dat, # Set dataset
+perc.over = 100) # Select oversampling for minority class
+# Build tree
+tree_6 <- rpart(resp_var ~., # Set tree formula
+data = smote_dat_2) # Set data
+# Predict test data
+preds <- predict(tree_6, test_dat)
+# Extract probabilities and produce table
+plot_dat <- cbind.data.frame(preds[,2], test_dat$resp_var)
+names(plot_dat) <- c("probability", "response")
+preds_char <- rep("no_help", nrow(plot_dat)) # Create vector for predictions with deafult value
+preds_char[which(plot_dat$probability >= 0.6)] <- "sought_help" # Select sought help predictions
+confusionMatrix(table(preds_char, plot_dat$response)) # Create confusion matrix
+```
+
+Not much of an increase, lets try combining smote and modifying the parameter values. First we can build a maximal tree and look at the cp:
+
+```{r smote cp}
+# Set seed
+set.seed(999999)
+# Build tree
+tree_7 <- rpart(resp_var ~., # Set tree formula
+data = smote_dat_2, # Set data
+control = rpart.control(cp = 0)) # Select cp 
+# Plot CP
+plotcp(tree_7)
+# Print CP
+printcp(tree_7)
+```
+
+The cp appears to be minimized about 0.004. Instead of returning probabilities from the prediction we can set `type="class"` in the predict function to get the function to return a class prediction.
+
+```{r tune smote}
+
+# Build tree
+tree_8 <- rpart(resp_var ~., # Set tree formula
+data = smote_dat_2, # Set data
+control = rpart.control(cp = 0.004)) # Select cp
+
+# Predict test data
+preds <- predict(tree_8, test_dat, type = "class")
+
+confusionMatrix(table(preds,  test_dat$resp_var)) # Create confusion matrix
+```
+
+That led to a decrease in performance for the tree, we are now likely overfitting the data. 
+
+
+# Exercises
+
+For this analysis we will be looking at heart failure data. The dataset is stored as:
+
+```{r}
+load(file="heart_failure_data.rda")
+```
+
+
+Diagnosing those at risk of death due to heart failure is critical in order to reduce the associated deaths. Those who are determined to be at risk of death due to heart failure can be treated with more extreme measures such as surgery whereas those who are not can utilize more preventative methods such as lifestyle changes. Heart failure mortality can be difficult to predict as there are often many different factors involved and the individuality of patients means certain conditions are likely to be more impact than others. Heart Failure is a slow and gradual process with certain stages, correlated with decreased heart functioning. Certain conditions such as high blood pressure and coronary artery disease are strongly correlated with heart failure. 
+
+Dataset from Davide Chicco, Giuseppe Jurman: Machine learning can predict survival of patients with heart failure from serum creatinine and ejection fraction alone. BMC Medical Informatics and Decision Making 20, 16 (2020)
+
+Let's view a summary of the data:
+```{r}
+summary(heart_data)
+```
+
+The variables we have are:
+
+* age -  Patient Age
+* anaemia - Decrease of red blood cells or hemoglobin (boolean)
+* creatinine_phosphokinase - Level of the CPK enzyme in the blood (mcg/L)
+* diabetes - If the patient has diabetes (boolean)
+* ejection_fraction - Percentage of blood leaving the heart at each contraction (percentage)
+* high_blood_pressure - If the patient has hypertension (boolean)
+* platelets - Platelets in the blood (kiloplatelets/mL)
+* serum_creatinine - Level of serum creatinine in the blood (mg/dL)
+* serum_sodium - Level of serum sodium in the blood (mEq/L)
+* sex - Woman or man (binary)
+* smoking - If the patient smokes or not (boolean)
+* DEATH_EVENT - If the patient deceased during the follow-up period (boolean)
+
+Our objectives for this analysis are two-fold, we want to identify the factors which lead to heart failure and build a model which can predict heart failure. 
+
+Please attempt the following exercises:
+
+* Create two visualizations which may reveal variables with potential predictive power.
+
+* Select the optimal CP for a decision tree built on this dataset.
+
+
+* Construct a tree using the full dataset with the optimal CP.
+
+* Plot the constructed decision tree.
+
+* What are the key variables which play a role in heart failure?
+
+Next lets split the data into training and test sets:
+
+```{r}
+ set.seed(123456) # Set seed
+# Perform stratified sampling
+ split_dat <- stratified(heart_data, group = "DEATH_EVENT", size = 0.2, bothSets = TRUE )
+ # Extract train data
+ train_data <- split_dat[[2]]
+ # Extract test data
+ test_data <- split_dat[[1]]
+```
+
+* Construct a decision tree on the training data
+
+```{r Decision tree Ex}
+tree_ex <- rpart(DEATH_EVENT ~., # Set tree formula
+data = train_data) # Set dataset
+par(xpd = NA) # Set this avoid cut-off text
+#plot(tree_ex)  # Plot tree
+#text(tree_ex, digits = 3)# Add text
+fancyRpartPlot(tree_ex)
+```
+
+* How has the tree changed from the tree built on the full dataset?
+
+
+* Predict the outcome for the test data.
+
+
+* Visualize the results of the predictions in a confusion matrix.
+
+
+* What was the accuracy of the decision tree? What was the balanced accuracy?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
